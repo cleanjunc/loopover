@@ -357,6 +357,9 @@ describe("planAgentMaintenanceActions (#778)", () => {
       const cls = classes(plan);
       expect(cls).not.toContain("merge");
       expect(cls).toContain("close");
+      // "not_required", not undefined -- the planner always tags a heuristic close explicitly (#2478) so a
+      // REPLAYED staged action can tell "not CI-driven" apart from "legacy row, field didn't exist yet".
+      expect(plan.find((a) => a.actionClass === "close")?.closeRequiresCiState).toBe("not_required");
       expect(plan.find((a) => a.actionClass === "label")?.label).toBe(AGENT_LABEL_CHANGES);
     });
 
@@ -485,6 +488,7 @@ describe("planAgentMaintenanceActions (#778)", () => {
       expect(close).toBeTruthy();
       expect(close?.reason).toContain("CI is failing");
       expect(close?.reason).toContain("codecov/patch");
+      expect(close?.closeRequiresCiState).toBe("failed");
     });
 
     it("NEVER closes the owner's red-CI PR — held via the changes-requested LABEL only (no blocking request_changes), left open", () => {

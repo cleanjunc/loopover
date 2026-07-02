@@ -129,15 +129,22 @@ export async function executeAgentMaintenanceActions(env: Env, ctx: AgentActionE
       await audit("denied", `${pullRequestFreshnessDetail(freshness)} — action not executed`);
       continue;
     }
-    // 6) Live CI re-verification for a merge or a heuristic close (#2128): the CI aggregate that drove either
-    //    decision was read seconds-to-tens-of-seconds earlier, in the planning pass, and the freshness guard
-    //    above only re-checks head SHA/state, not CI. GitHub's own merge endpoint enforces branch-protection
-    //    REQUIRED checks server-side, but only as a backstop when a repo actually configures them; a heuristic
-    //    close has no server-side check at all. Re-read live CI right before the mutation so a check that
-    //    flipped in this narrow window is never acted on from stale information. Deterministic closes
-    //    (linked-issue hard-rule, blacklist) are exempt — they are zero-hallucination facts that do not depend
-    //    on CI, and the linked-issue rule already has its own flag-then-verify pass.
-    if (action.actionClass === "merge" || (action.actionClass === "close" && action.closeKind === "heuristic")) {
+    // 6) Live CI re-verification for a merge or a CI-driven heuristic close (#2128): the CI aggregate that drove
+    //    either decision was read seconds-to-tens-of-seconds earlier, in the planning pass, and the freshness
+    //    guard above only re-checks head SHA/state, not CI. GitHub's own merge endpoint enforces
+    //    branch-protection REQUIRED checks server-side, but only as a backstop when a repo actually configures
+    //    them; a red-CI close has no server-side check at all. Re-read live CI right before the mutation so a
+    //    check that flipped in this narrow window is never acted on from stale information. Non-CI closes
+    //    (gate verdict, duplicate/slop, conflict, linked-issue hard-rule, blacklist) are exempt — their adverse
+    //    signal does not depend on CI still being red.
+    //    A heuristic close staged BEFORE #2478 has no closeRequiresCiState at all -- that field didn't exist yet
+    //    -- so `undefined` here is genuinely ambiguous (a legacy CI-driven close and a legacy non-CI close are
+    //    byte-identical in storage). The planner now ALWAYS sets the field going forward (never omits it), so
+    //    `undefined` can only mean a legacy row; treat it with the old, broader pre-#2478 guard (require CI still
+    //    failed) rather than skipping the recheck, which would let a stale CI-driven close silently execute
+    //    after CI recovers (flagged by the gate's own review of #2478).
+    const isAmbiguousLegacyHeuristicClose = action.actionClass === "close" && action.closeKind === "heuristic" && action.closeRequiresCiState === undefined;
+    if (action.actionClass === "merge" || (action.actionClass === "close" && action.closeRequiresCiState === "failed") || isAmbiguousLegacyHeuristicClose) {
       const ciToken = await createInstallationToken(env, ctx.installationId).catch(() => undefined);
       const admissionKey = githubRateLimitAdmissionKeyForToken(env, ciToken, ctx.installationId);
       const liveCi = await fetchLiveCiAggregate(env, ctx.repoFullName, expectedHeadSha, ciToken, undefined, admissionKey);
@@ -151,7 +158,9 @@ export async function executeAgentMaintenanceActions(env: Env, ctx: AgentActionE
           ? liveCi.ciState !== "passed"
             ? `live CI is no longer passing (now: ${liveCi.ciState})`
             : null
-          : liveCi.ciState !== "failed"
+          // isAmbiguousLegacyHeuristicClose falls back to "failed" (the old unconditional requirement); an
+          // explicitly-tagged fresh close compares against its own recorded requirement.
+          : liveCi.ciState !== (action.closeRequiresCiState ?? "failed")
             ? `CI state changed since planning (now: ${liveCi.ciState})`
             : null;
       if (staleReason) {
@@ -317,10 +326,11 @@ export function actionParams(action: PlannedAgentAction): AgentPendingActionPara
     ...(action.dismissStaleApproval !== undefined ? { dismissStaleApproval: action.dismissStaleApproval } : {}),
     // Round-trip closeKind so a staged close's kind survives to accept-time — without it, the close-precision
     // breaker's isHeuristicClose check (which matches on closeKind === "heuristic") could never fire for any
-    // staged close, silently defeating the breaker for the entire approval-queue accept path (#2127), and the
-    // actuation-time live-CI re-check above (#2364) — which only applies to a heuristic close — would be
-    // silently skipped for a lost discriminator.
+    // staged close, silently defeating the breaker for the entire approval-queue accept path (#2127).
     ...(action.closeKind !== undefined ? { closeKind: action.closeKind } : {}),
+    // Round-trip the CI dependency separately from closeKind: closeKind is intentionally broad (gate-verdict /
+    // duplicate / slop / CI) for the close-precision breaker, but only red-CI closes need the live-CI guard.
+    ...(action.closeRequiresCiState !== undefined ? { closeRequiresCiState: action.closeRequiresCiState } : {}),
   };
 }
 
