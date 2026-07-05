@@ -126,6 +126,12 @@ describe("isGeneratedFile", () => {
     expect(classifyChangedFile("proto/messages.pb.hs")).toBe("generated");
   });
 
+  it("matches Nim protobuf output alongside the other protoc plugins", () => {
+    expect(isGeneratedFile("gen/service_pb.nim")).toBe(true);
+    expect(isGeneratedFile("src/main.nim")).toBe(false);
+    expect(classifyChangedFile("gen/service_pb.nim")).toBe("generated");
+  });
+
   it("matches Swift protobuf, Dart freezed/retrofit, C# designer/XAML, and Objective-C protoc output", () => {
     for (const path of [
       "proto/messages.pb.swift",
@@ -453,6 +459,7 @@ describe("classifyChangedFile", () => {
       ["proto/messages.pb.cr", "generated"],
       ["dist/pkg.wasm.map", "generated"],
       ["proto/messages.pb.hs", "generated"],
+      ["gen/service_pb.nim", "generated"],
       ["vendor/lib.go", "vendored"],
       ["package-lock.json", "lockfile"],
       ["bun.lock", "lockfile"],
