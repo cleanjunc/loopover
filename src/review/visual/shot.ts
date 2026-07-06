@@ -34,9 +34,17 @@ type ScreenshotRequest = {
   abort(): Promise<unknown>;
   continue(): Promise<unknown>;
 };
+type ScreenshotPage = {
+  evaluate<T>(fn: () => T): Promise<T>;
+  screenshot(options: { type: "png"; fullPage: true }): Promise<Uint8Array>;
+};
 export const DESKTOP_VIEWPORT: Viewport = { width: 1440, height: 900 };
 export const MOBILE_VIEWPORT: Viewport = { width: 390, height: 844 }; // iPhone-class portrait
 const VIEWPORT = DESKTOP_VIEWPORT;
+export const MAX_SCREENSHOT_HEIGHT = 10000;
+export const MAX_SCREENSHOT_PIXELS = 14_400_000; // 1440 × 10000, matching the full-page cap.
+export const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
+const SCREENSHOT_TIMEOUT_MS = 10000;
 
 /** Per-call shot-route options: the R2 namespace (key prefix) + the production host for the on-demand render
  *  allowlist. Defaults to gittensory so the /gittensory/shot route works with no options. */
@@ -114,6 +122,61 @@ function isAllowedHost(targetUrl: string, env: Env, productionUrl?: string): boo
   return false;
 }
 
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** Reads a PNG's real width/height straight from its IHDR chunk -- Chromium's own rasterized output, not a
+ *  value the screenshotted page's JavaScript can influence. Returns null (fail-closed) for anything that
+ *  isn't a well-formed PNG IHDR header, which the caller must treat as "reject", not "skip the check". */
+function readPngDimensions(png: Uint8Array): { width: number; height: number } | null {
+  if (png.byteLength < 24) return null;
+  for (let i = 0; i < PNG_SIGNATURE.length; i++) {
+    if (png[i] !== PNG_SIGNATURE[i]) return null;
+  }
+  if (String.fromCharCode(png[12]!, png[13]!, png[14]!, png[15]!) !== "IHDR") return null;
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  return { width: view.getUint32(16, false), height: view.getUint32(20, false) };
+}
+
+async function captureBoundedFullPageShot(page: ScreenshotPage, viewport: Viewport): Promise<Uint8Array | null> {
+  // Fast-path only: this executes inside the screenshotted PAGE's own JS realm, so a hostile page can override
+  // scrollHeight/offsetHeight getters (e.g. via Object.defineProperty) to under-report its height and sail
+  // through this check -- it does not by itself guard anything (#3712 security review). Real enforcement is
+  // the post-capture dimension re-check below, against Chromium's actual rasterized output.
+  const height = await page.evaluate(() => {
+    const doc = (globalThis as unknown as { document: { body: { scrollHeight: number; offsetHeight: number }; documentElement: { clientHeight: number; scrollHeight: number; offsetHeight: number } } }).document;
+    const body = doc.body;
+    const element = doc.documentElement;
+    return Math.ceil(Math.max(body.scrollHeight, body.offsetHeight, element.clientHeight, element.scrollHeight, element.offsetHeight));
+  });
+  const pixelArea = viewport.width * height;
+  if (height > MAX_SCREENSHOT_HEIGHT || pixelArea > MAX_SCREENSHOT_PIXELS) {
+    console.log(JSON.stringify({ ev: "render_screenshot_too_large", width: viewport.width, height, maxHeight: MAX_SCREENSHOT_HEIGHT, maxPixels: MAX_SCREENSHOT_PIXELS }));
+    return null;
+  }
+
+  const shot = await Promise.race([
+    page.screenshot({ type: "png", fullPage: true }),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), SCREENSHOT_TIMEOUT_MS)),
+  ]);
+  if (!shot) {
+    console.log(JSON.stringify({ ev: "render_screenshot_timeout", timeoutMs: SCREENSHOT_TIMEOUT_MS }));
+    return null;
+  }
+  if (shot.byteLength > MAX_SCREENSHOT_BYTES) {
+    console.log(JSON.stringify({ ev: "render_screenshot_bytes_too_large", bytes: shot.byteLength, maxBytes: MAX_SCREENSHOT_BYTES }));
+    return null;
+  }
+  // Re-validate against the ACTUAL rendered PNG dimensions -- these come from Chromium's rasterizer, not page
+  // script, so the height spoof above cannot reach them. Anything that isn't a readable PNG header is rejected
+  // rather than let through, since that's precisely what a successful spoof would look like from here.
+  const dims = readPngDimensions(shot);
+  if (!dims || dims.height > MAX_SCREENSHOT_HEIGHT || dims.width * dims.height > MAX_SCREENSHOT_PIXELS) {
+    console.log(JSON.stringify({ ev: "render_screenshot_dimensions_too_large", width: dims?.width ?? null, height: dims?.height ?? null, maxHeight: MAX_SCREENSHOT_HEIGHT, maxPixels: MAX_SCREENSHOT_PIXELS }));
+    return null;
+  }
+  return shot;
+}
+
 /**
  * Render a page to a PNG via the Browser Rendering binding, also reporting whether the route redirected to a
  * sign-in wall. `authWalled` is true when the FINAL url looks like a login page that the REQUESTED url was
@@ -167,12 +230,10 @@ export async function captureShot(env: Env, url: string, viewport: Viewport = VI
       console.log(JSON.stringify({ ev: "render_screenshot_auth_walled", url, final: page.url().slice(0, 200) }));
       return { png: null, authWalled: true };
     }
-    // Full-page (not just the viewport): before/after must show the SAME position on the page for any
-    // change, however far down it is. A viewport-only shot only captures whatever happens to be in frame at
-    // load time, which for a change midway down a long page would silently miss it in both cells. Capturing
-    // the whole scrollable height means the changed region is always present in both images at the same
-    // relative offset, with no need to locate/scroll to it first.
-    const shot = (await page.screenshot({ type: "png", fullPage: true })) as Uint8Array;
+    // Full-page (not just the viewport), but bounded: before/after should include the same page position for
+    // normal review pages without letting attacker-controlled document height or PNG size drive unbounded
+    // Chromium raster work on the public screenshot route.
+    const shot = await captureBoundedFullPageShot(page, viewport);
     return { png: shot, authWalled: false };
   } catch (error) {
     // Log before degrading to null — otherwise a networkidle0 timeout, a binding quota error, or a render
