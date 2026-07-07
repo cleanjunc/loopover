@@ -43,6 +43,7 @@ type InlineFinding = {
   severity: "blocker" | "nit";
   body: string;
   suggestion?: string;
+  endLine?: number;
   category?: "security" | "correctness" | "performance" | "maintainability" | "tests" | "style";
 };
 type ModelReviewShape = {
@@ -3034,6 +3035,25 @@ describe("pure helpers", () => {
     ]);
   });
 
+  it("parseModelReview parses endLine for multi-line inline findings and drops inverted ranges (#2141)", () => {
+    const json = JSON.stringify({
+      assessment: "ok",
+      blockers: [],
+      nits: [],
+      suggestions: [],
+      inlineFindings: [
+        { path: "src/a.ts", line: 1, endLine: 3, severity: "nit", body: "Multi." },
+        { path: "src/b.ts", line: 5, endLine: 3, severity: "nit", body: "Inverted." },
+        { path: "src/c.ts", line: 2, endLine: 2, severity: "nit", body: "Equal." },
+      ],
+    });
+    expect(parseModelReview(json)?.inlineFindings).toEqual([
+      { path: "src/a.ts", line: 1, endLine: 3, severity: "nit", body: "Multi." },
+      { path: "src/b.ts", line: 5, severity: "nit", body: "Inverted." },
+      { path: "src/c.ts", line: 2, severity: "nit", body: "Equal." },
+    ]);
+  });
+
   it("parseModelReview drops malformed inline findings (non-object / missing path|line|body / non-positive line), never partial", () => {
     const json = JSON.stringify({
       assessment: "ok",
@@ -3082,6 +3102,21 @@ describe("pure helpers", () => {
         }),
       )?.inlineFindings,
     ).toEqual([]);
+  });
+
+  it("composeInlineFindings carries endLine through compose and merge (#2141)", () => {
+    const out = composeInlineFindings([
+      reviewWithFindings([
+        { path: "src/a.ts", line: 1, endLine: 3, severity: "nit", body: "Multi-line note." },
+      ]),
+      reviewWithFindings([
+        { path: "src/a.ts", line: 1, severity: "blocker", body: "Stronger body." },
+        { path: "src/a.ts", line: 1, endLine: 4, severity: "nit", body: "Weaker with wider range." },
+      ]),
+    ]);
+    expect(out).toEqual([
+      { path: "src/a.ts", line: 1, endLine: 3, severity: "blocker", body: "Stronger body." },
+    ]);
   });
 
   it("composeInlineFindings MERGES same-(path,line) findings across reviewers: max severity, suggestion carried from whichever had it; distinct lines untouched (#2158)", () => {

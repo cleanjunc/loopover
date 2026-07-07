@@ -32,6 +32,10 @@ describe("addedLinesByPath + isSuggestionAnchorable (#2140)", () => {
     expect(isSuggestionAnchorable({ path: "src/missing.ts", line: 1 }, addedLines)).toBe(false);
   });
 
+  it("returns false when the file path is absent from the added-line map (#2141)", () => {
+    expect(isSuggestionAnchorable({ path: "src/unknown.ts", line: 1, endLine: 2 }, new Map())).toBe(false);
+  });
+
   it("omits files with empty or non-string patches", () => {
     const addedLines = addedLinesByPath([
       { path: "src/empty.ts", payload: { patch: "" } },
@@ -58,6 +62,27 @@ describe("anchoredSuggestionBlock (#2140)", () => {
 
   it("drops the suggestion on a context line but leaves the caller to keep the finding text", () => {
     expect(anchoredSuggestionBlock({ ...withSuggestion, line: 1 }, true, addedLines)).toBe("");
+  });
+
+  it("keeps a multi-line suggestion when every line in the range is added (#2141)", () => {
+    const multiAdded = addedLinesByPath([{ path: "src/a.ts", payload: { patch: "@@ -1,0 +1,2 @@\n+one\n+two" } }]);
+    expect(
+      anchoredSuggestionBlock(
+        { ...withSuggestion, line: 1, endLine: 2, suggestion: "one\ntwo" },
+        true,
+        multiAdded,
+      ),
+    ).toContain("```suggestion");
+  });
+
+  it("drops a multi-line suggestion when any line in the range is context (#2141)", () => {
+    expect(
+      anchoredSuggestionBlock(
+        { ...withSuggestion, line: 1, endLine: 2, suggestion: "ctx\nadd" },
+        true,
+        addedLines,
+      ),
+    ).toBe("");
   });
 
   it("drops unsafe suggestion fences even on an added line", () => {

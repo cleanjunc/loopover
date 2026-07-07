@@ -174,6 +174,67 @@ describe("selectInlineComments (#inline-comments)", () => {
       };
       expect(selectInlineComments([finding], files, true)).toEqual([]);
     });
+
+    it("renders a multi-line ```suggestion when the full range is added and commentable (#2141)", () => {
+      const multiFiles = [{ path: "src/a.ts", payload: { patch: "@@ -1,0 +1,3 @@\n+one\n+two\n+three" } }];
+      const finding: InlineFinding = {
+        path: "src/a.ts",
+        line: 1,
+        endLine: 3,
+        severity: "nit",
+        body: "Replace block.",
+        suggestion: "alpha\nbeta\ngamma",
+      };
+      const out = selectInlineComments([finding], multiFiles, true);
+      expect(out).toEqual([
+        {
+          path: "src/a.ts",
+          line: 3,
+          start_line: 1,
+          start_side: "RIGHT",
+          side: "RIGHT",
+          body: "**Nit:** Replace block.\n\n```suggestion\nalpha\nbeta\ngamma\n```",
+        },
+      ]);
+    });
+
+    it("downgrades to a single-line anchor when the range is only partially commentable (#2141)", () => {
+      const partialFiles = [{ path: "src/a.ts", payload: { patch: "@@ -1,1 +1,2 @@\n ctx\n+added2" } }];
+      const finding: InlineFinding = {
+        path: "src/a.ts",
+        line: 1,
+        endLine: 99,
+        severity: "nit",
+        body: "Partial range.",
+        suggestion: "fix",
+      };
+      const out = selectInlineComments([finding], partialFiles, true);
+      expect(out).toEqual([
+        { path: "src/a.ts", line: 1, side: "RIGHT", body: "**Nit:** Partial range." },
+      ]);
+    });
+
+    it("strips the suggestion on a multi-line range that includes a context line (#2141)", () => {
+      const mixedFiles = [{ path: "src/a.ts", payload: { patch: "@@ -1,2 +1,4 @@\n ctx\n+add2\n ctx4\n+add4" } }];
+      const finding: InlineFinding = {
+        path: "src/a.ts",
+        line: 2,
+        endLine: 3,
+        severity: "nit",
+        body: "Mixed range.",
+        suggestion: "add2\nctx4",
+      };
+      const out = selectInlineComments([finding], mixedFiles, true);
+      expect(out[0]).toMatchObject({
+        path: "src/a.ts",
+        line: 3,
+        start_line: 2,
+        start_side: "RIGHT",
+        side: "RIGHT",
+      });
+      expect(out[0]?.body).toBe("**Nit:** Mixed range.");
+      expect(out[0]?.body).not.toContain("```suggestion");
+    });
   });
 
   describe("category tags (#1958 / #2149)", () => {
@@ -270,6 +331,41 @@ describe("postInlineReviewComments (#inline-comments, fail-safe)", () => {
     });
     expect(await postInlineReviewComments(envWithKey(), { ...base, commitId: "headsha", findings })).toEqual({ posted: 1 });
     expect(calls[0]?.body).toMatchObject({ event: "COMMENT", commit_id: "headsha", comments: [{ path: "src/a.ts", line: 2, side: "RIGHT", body: "**Nit:** guard this" }] });
+  });
+
+  it("posts multi-line inline comments with start_line/start_side (#2141)", async () => {
+    const multiFiles = [{ path: "src/a.ts", payload: { patch: "@@ -1,0 +1,2 @@\n+one\n+two" } }];
+    const multiFindings: InlineFinding[] = [
+      { path: "src/a.ts", line: 1, endLine: 2, severity: "nit", body: "Replace both.", suggestion: "one\ntwo" },
+    ];
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.includes("/access_tokens")) return Response.json({ token: "t" });
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith("/pulls/3/reviews")) return Response.json({ id: 5 });
+      return new Response("unexpected", { status: 500 });
+    });
+    expect(
+      await postInlineReviewComments(envWithKey(), {
+        ...base,
+        commitId: "headsha",
+        files: multiFiles,
+        findings: multiFindings,
+        suggestionsEnabled: true,
+      }),
+    ).toEqual({ posted: 1 });
+    expect(calls[0]?.body).toMatchObject({
+      comments: [
+        {
+          path: "src/a.ts",
+          line: 2,
+          start_line: 1,
+          start_side: "RIGHT",
+          side: "RIGHT",
+        },
+      ],
+    });
   });
 
   it("swallows an API error (the gate is never affected), reports 0 posted, and surfaces it at ERROR for Sentry (#5)", async () => {
