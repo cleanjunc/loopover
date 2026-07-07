@@ -1,4 +1,4 @@
-import type { CommandAuthorizationRole, RepositoryCommandAuthorizationPolicy } from "../types";
+import type { CommandAuthorizationRole, RepositoryCommandAuthorizationPolicy } from "../types/manifest-deps-types.js";
 
 export const DEFAULT_COMMAND_AUTHORIZATION_POLICY: RepositoryCommandAuthorizationPolicy = {
   default: ["maintainer", "collaborator", "confirmed_miner"],

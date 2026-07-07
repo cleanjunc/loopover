@@ -1,7 +1,7 @@
-import { matchesAny } from "../signals/change-guardrail";
-import type { ScreenshotTableGateAction, ScreenshotTableGateConfig } from "../types";
+import { matchesAny } from "../signals/change-guardrail.js";
+import type { ScreenshotTableGateAction, ScreenshotTableGateConfig } from "../types/manifest-deps-types.js";
 
-export type { ScreenshotTableGateAction, ScreenshotTableGateConfig } from "../types";
+export type { ScreenshotTableGateAction, ScreenshotTableGateConfig } from "../types/manifest-deps-types.js";
 
 // Config-driven before/after screenshot-table gate (#2006). Contributor visual/frontend PRs are unreviewable
 // at a glance without before/after evidence — this is a DETERMINISTIC (no AI, zero hallucination risk) check
