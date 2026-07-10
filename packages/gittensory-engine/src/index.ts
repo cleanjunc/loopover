@@ -193,6 +193,11 @@ export {
   type CodingAgentDriverTask,
 } from "./miner/coding-agent-driver.js";
 export {
+  createCliSubprocessCodingAgentDriver,
+  type CliSubprocessDriverOptions,
+  type CliSubprocessSpawnFn,
+} from "./miner/cli-subprocess-driver.js";
+export {
   invokeCodingAgentDriver,
   type AttemptLogSink,
 } from "./miner/coding-agent-invoke.js";
