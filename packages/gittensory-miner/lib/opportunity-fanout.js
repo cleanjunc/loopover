@@ -5,6 +5,9 @@ import { fetchWithRetry } from "./http-retry.js";
 const defaultApiBaseUrl = "https://api.github.com";
 const defaultConcurrency = 5;
 const defaultPerPage = 100;
+// Follow the GitHub Link header past the first page so a repo/search with >100 open issues isn't silently
+// truncated (#4831); cap the follow loop so a pathological Link chain can't run away.
+const defaultMaxPages = 10;
 const githubApiVersion = "2022-11-28";
 
 function normalizeLimit(value, fallback, min, max) {
@@ -207,33 +210,46 @@ function searchQueryWithIssueQualifiers(searchQuery) {
   return `${trimmed} state:open type:issue`;
 }
 
+// The URL of the next page from a GitHub Link header (`<url>; rel="next"`), or null when this is the last page.
+function nextPageUrl(response) {
+  const linkHeader = response.headers.get("link") ?? "";
+  const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+  return match !== null ? match[1] : null;
+}
+
 async function fetchTargetIssues(target, githubToken, options, summary, warnings) {
   const verdict = await resolveRepoAiPolicy(target, githubToken, options, summary, warnings);
   if (!verdict.allowed) return [];
 
-  const url = apiUrl(
+  let url = apiUrl(
     options.apiBaseUrl,
     repoPath(target, "/issues"),
     `?state=open&per_page=${options.perPage}`,
   );
+  const issues = [];
   try {
-    const { response, payload } = await githubGetJson(url, githubToken, summary, options);
-    if (!response.ok) {
-      warnings.push(warning(target, "issues", `GitHub returned ${response.status}`));
-      return [];
+    for (let page = 0; url !== null && page < options.maxPages; page += 1) {
+      const { response, payload } = await githubGetJson(url, githubToken, summary, options);
+      if (!response.ok) {
+        warnings.push(warning(target, "issues", `GitHub returned ${response.status}`));
+        return issues;
+      }
+      if (!Array.isArray(payload)) {
+        warnings.push(warning(target, "issues", "GitHub returned a non-array issues payload"));
+        return issues;
+      }
+      for (const issue of payload) {
+        const normalized = normalizeIssue(target, issue, verdict.source);
+        if (normalized !== null) issues.push(normalized);
+      }
+      url = nextPageUrl(response);
     }
-    if (!Array.isArray(payload)) {
-      warnings.push(warning(target, "issues", "GitHub returned a non-array issues payload"));
-      return [];
-    }
-    return payload
-      .map((issue) => normalizeIssue(target, issue, verdict.source))
-      .filter((issue) => issue !== null);
+    return issues;
   } catch (error) {
     warnings.push(
       warning(target, "issues", error instanceof Error ? error.message : "issue fetch failed"),
     );
-    return [];
+    return issues;
   }
 }
 
@@ -241,37 +257,42 @@ async function fetchSearchIssues(searchQuery, githubToken, options, summary, war
   const qualifiedQuery = searchQueryWithIssueQualifiers(searchQuery);
   if (!qualifiedQuery) return [];
 
-  const url = apiUrl(
+  let url = apiUrl(
     options.apiBaseUrl,
     "/search/issues",
     `?q=${encodeURIComponent(qualifiedQuery)}&per_page=${options.perPage}`,
   );
+  const items = [];
   try {
-    const { response, payload } = await githubGetJson(url, githubToken, summary, options);
-    if (!response.ok) {
-      warnings.push({
-        repoFullName: "*",
-        stage: "search",
-        message: `GitHub returned ${response.status}`,
-      });
-      return [];
+    for (let page = 0; url !== null && page < options.maxPages; page += 1) {
+      const { response, payload } = await githubGetJson(url, githubToken, summary, options);
+      if (!response.ok) {
+        warnings.push({
+          repoFullName: "*",
+          stage: "search",
+          message: `GitHub returned ${response.status}`,
+        });
+        return items;
+      }
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
+        warnings.push({
+          repoFullName: "*",
+          stage: "search",
+          message: "GitHub returned a non-array search payload",
+        });
+        return items;
+      }
+      items.push(...payload.items);
+      url = nextPageUrl(response);
     }
-    if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
-      warnings.push({
-        repoFullName: "*",
-        stage: "search",
-        message: "GitHub returned a non-array search payload",
-      });
-      return [];
-    }
-    return payload.items;
+    return items;
   } catch (error) {
     warnings.push({
       repoFullName: "*",
       stage: "search",
       message: error instanceof Error ? error.message : "issue search failed",
     });
-    return [];
+    return items;
   }
 }
 
@@ -297,6 +318,7 @@ function normalizeOptions(options = {}) {
         : defaultApiBaseUrl,
     concurrency: normalizeLimit(options.concurrency, defaultConcurrency, 1, 10),
     perPage: normalizeLimit(options.perPage, defaultPerPage, 1, 100),
+    maxPages: normalizeLimit(options.maxPages, defaultMaxPages, 1, 100),
     // Passed through to the per-fetch retry so tests can inject an instant sleep; undefined uses the real backoff.
     sleepFn: typeof options.sleepFn === "function" ? options.sleepFn : undefined,
   };
