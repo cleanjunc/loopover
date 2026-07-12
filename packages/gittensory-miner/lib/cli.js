@@ -34,6 +34,7 @@ export function printHelp(input) {
       "  gittensory-miner claim release <owner/repo> <issue#> [--json]",
       "  gittensory-miner claim list [--repo <owner/repo>] [--status active|released|expired] [--json]",
       "  gittensory-miner ledger list [--repo <owner/repo>] [--since <seq>] [--type <eventType>] [--json]",
+      "  gittensory-miner ledger metrics                               Print event-ledger counters in Prometheus text format",
       "  gittensory-miner plan list [--status pending|running|completed|failed] [--json]",
       "  gittensory-miner plan show <planId> [--json]",
       "  gittensory-miner governor list [--repo <owner/repo>] [--type allowed|denied|throttled|kill_switch] [--json]",

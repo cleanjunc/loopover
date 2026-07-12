@@ -63,7 +63,14 @@ export function collectEventLedgerAuditFeed(
 
 export function renderLedgerTable(events: LedgerEntry[]): string;
 
+export function renderEventLedgerMetrics(events: readonly LedgerEntry[]): string;
+
 export function runLedgerList(
+  args: string[],
+  options?: { initEventLedger?: () => EventLedger },
+): number;
+
+export function runLedgerMetrics(
   args: string[],
   options?: { initEventLedger?: () => EventLedger },
 ): number;

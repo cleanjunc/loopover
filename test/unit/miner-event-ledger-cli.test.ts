@@ -9,9 +9,11 @@ import {
 import {
   filterLedgerEvents,
   parseLedgerListArgs,
+  renderEventLedgerMetrics,
   renderLedgerTable,
   runLedgerCli,
   runLedgerList,
+  runLedgerMetrics,
 } from "../../packages/gittensory-miner/lib/event-ledger-cli.js";
 import type { LedgerEntry } from "../../packages/gittensory-miner/lib/event-ledger.d.ts";
 
@@ -24,6 +26,16 @@ function tempLedger() {
   const ledger = initEventLedger(join(root, "event-ledger.sqlite3"));
   ledgers.push(ledger);
   return ledger;
+}
+
+function tempEventDbPath() {
+  const root = mkdtempSync(join(tmpdir(), "gittensory-miner-event-ledger-metrics-"));
+  roots.push(root);
+  return join(root, "event-ledger.sqlite3");
+}
+
+function metricEntry(seq: number, type: string): LedgerEntry {
+  return { id: seq, seq, type, repoFullName: null, payload: {}, createdAt: "2026-07-04T12:00:00.000Z" };
 }
 
 afterEach(() => {
@@ -127,5 +139,110 @@ describe("gittensory-miner event ledger CLI (#2290)", () => {
       }),
     ).toBe(2);
     expect(error).toHaveBeenCalledWith("since must be a non-negative integer seq cursor.");
+  });
+});
+
+describe("gittensory-miner ledger metrics CLI (#4841)", () => {
+  it("renderEventLedgerMetrics emits one sorted gittensory_miner_events_total series per type", () => {
+    const text = renderEventLedgerMetrics([
+      metricEntry(1, "manage_pr_update"),
+      metricEntry(2, "discovered_issue"),
+      metricEntry(3, "manage_pr_update"),
+    ]);
+    expect(text).toContain(
+      "# HELP gittensory_miner_events_total Event-ledger entries the miner has recorded, by event type.",
+    );
+    expect(text).toContain("# TYPE gittensory_miner_events_total counter");
+    // Series are emitted in sorted type order, so "discovered_issue" precedes "manage_pr_update".
+    expect(text).toContain('gittensory_miner_events_total{type="discovered_issue"} 1');
+    expect(text).toContain('gittensory_miner_events_total{type="manage_pr_update"} 2');
+    expect(text.indexOf("discovered_issue")).toBeLessThan(text.indexOf("manage_pr_update"));
+    expect(text.endsWith("\n")).toBe(true);
+  });
+
+  it("renderEventLedgerMetrics still emits a well-formed document for an empty ledger", () => {
+    expect(renderEventLedgerMetrics([])).toBe(
+      "# HELP gittensory_miner_events_total Event-ledger entries the miner has recorded, by event type.\n" +
+        "# TYPE gittensory_miner_events_total counter\n",
+    );
+  });
+
+  it("renderEventLedgerMetrics escapes label-breaking characters in the event type", () => {
+    expect(renderEventLedgerMetrics([metricEntry(1, 'weird"type')])).toContain(
+      'gittensory_miner_events_total{type="weird\\"type"} 1',
+    );
+  });
+
+  it("runLedgerMetrics renders event counters as Prometheus text and returns 0", () => {
+    const eventLedger = tempLedger();
+    eventLedger.appendEvent({ type: "discovered_issue", repoFullName: "acme/widgets", payload: { issueNumber: 1 } });
+    eventLedger.appendEvent({ type: "manage_pr_update", repoFullName: "acme/widgets", payload: { prNumber: 2 } });
+    eventLedger.appendEvent({ type: "manage_pr_update", repoFullName: "acme/other", payload: { prNumber: 3 } });
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    expect(runLedgerMetrics([], { initEventLedger: () => eventLedger })).toBe(0);
+
+    const text = String(log.mock.calls[0]?.[0]);
+    expect(text).toContain("# TYPE gittensory_miner_events_total counter");
+    expect(text).toContain('gittensory_miner_events_total{type="discovered_issue"} 1');
+    expect(text).toContain('gittensory_miner_events_total{type="manage_pr_update"} 2');
+    // The output is a single, once-terminated document (no doubled trailing blank line).
+    expect(text.endsWith("\n")).toBe(false);
+  });
+
+  it("runLedgerMetrics opens and closes its own default ledger when none is injected", () => {
+    const dbPath = tempEventDbPath();
+    const seed = initEventLedger(dbPath);
+    seed.appendEvent({ type: "plan_built", payload: { steps: 1 } });
+    seed.close();
+
+    const prev = process.env.GITTENSORY_MINER_EVENT_LEDGER_DB;
+    process.env.GITTENSORY_MINER_EVENT_LEDGER_DB = dbPath;
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      expect(runLedgerMetrics([])).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.GITTENSORY_MINER_EVENT_LEDGER_DB;
+      else process.env.GITTENSORY_MINER_EVENT_LEDGER_DB = prev;
+    }
+    expect(String(log.mock.calls[0]?.[0])).toContain('gittensory_miner_events_total{type="plan_built"} 1');
+  });
+
+  it("runLedgerMetrics rejects unexpected arguments with a usage error", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(runLedgerMetrics(["--json"], { initEventLedger: () => tempLedger() })).toBe(2);
+    expect(error).toHaveBeenCalledWith("Usage: gittensory-miner ledger metrics");
+  });
+
+  it("runLedgerMetrics surfaces a thrown Error message and exits non-zero", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(
+      runLedgerMetrics([], {
+        initEventLedger: () => {
+          throw new Error("event ledger is locked");
+        },
+      }),
+    ).toBe(2);
+    expect(error).toHaveBeenCalledWith("event ledger is locked");
+  });
+
+  it("runLedgerMetrics stringifies a non-Error throw", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(
+      runLedgerMetrics([], {
+        initEventLedger: () => {
+          throw "event-ledger-unavailable";
+        },
+      }),
+    ).toBe(2);
+    expect(error).toHaveBeenCalledWith("event-ledger-unavailable");
+  });
+
+  it("runLedgerCli dispatches the metrics subcommand", () => {
+    const eventLedger = tempLedger();
+    eventLedger.appendEvent({ type: "plan_built", payload: { steps: 1 } });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    expect(runLedgerCli("metrics", [], { initEventLedger: () => eventLedger })).toBe(0);
+    expect(String(log.mock.calls[0]?.[0])).toContain('gittensory_miner_events_total{type="plan_built"} 1');
   });
 });

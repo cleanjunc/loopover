@@ -164,6 +164,46 @@ export function renderLedgerTable(events) {
   return [header, ...lines].join("\n");
 }
 
+const EVENT_LEDGER_METRICS_USAGE = "Usage: gittensory-miner ledger metrics";
+
+// Prometheus metric name for the per-type event-ledger counter. Mirrors the `gittensory_miner_*_total` naming and
+// the HELP/TYPE/label conventions of the engine's renderMinerPredictionMetrics
+// (packages/gittensory-engine/src/miner-prediction-metrics.ts) rather than importing across the package boundary.
+const MINER_EVENTS_TOTAL = "gittensory_miner_events_total";
+
+/** HELP-text escaping — backslash + newline (mirrors miner-prediction-metrics.ts's escapeHelpText). */
+function escapeHelpText(help) {
+  return help.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+}
+
+/** Prometheus label-value escaping — backslash, double-quote, newline — so an arbitrary event `type` string can
+ *  never break the metric line (mirrors miner-prediction-metrics.ts's escapeLabelValue). */
+function escapeLabelValue(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+}
+
+/**
+ * Render event-ledger activity as Prometheus text-exposition counters: one `gittensory_miner_events_total{type}`
+ * series per event type, so a self-hoster's own Grafana/alerting can scrape ledger activity instead of polling
+ * `ledger list --json` (#4841). Pure + side-effect-free — the caller supplies the rows and prints the result;
+ * deterministic (series emitted in sorted type order); always emits HELP/TYPE so an empty ledger is still a
+ * well-formed exposition document.
+ */
+export function renderEventLedgerMetrics(events) {
+  const totalByType = new Map();
+  for (const entry of events) {
+    totalByType.set(entry.type, (totalByType.get(entry.type) ?? 0) + 1);
+  }
+  const lines = [
+    `# HELP ${MINER_EVENTS_TOTAL} ${escapeHelpText("Event-ledger entries the miner has recorded, by event type.")}`,
+    `# TYPE ${MINER_EVENTS_TOTAL} counter`,
+  ];
+  for (const [type, count] of [...totalByType.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    lines.push(`${MINER_EVENTS_TOTAL}{type="${escapeLabelValue(type)}"} ${count}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function withEventLedger(options, run) {
   const ownsLedger = options.initEventLedger === undefined;
   const eventLedger = (options.initEventLedger ?? initEventLedger)();
@@ -203,8 +243,28 @@ export function runLedgerList(args, options = {}) {
   }
 }
 
+export function runLedgerMetrics(args, options = {}) {
+  if (args.length > 0) {
+    console.error(EVENT_LEDGER_METRICS_USAGE);
+    return 2;
+  }
+
+  try {
+    return withEventLedger(options, (eventLedger) => {
+      // renderEventLedgerMetrics returns a newline-terminated document; console.log re-adds the terminator, so
+      // trim it to emit exactly one trailing newline (mirrors metrics-cli.js's runMetrics).
+      console.log(renderEventLedgerMetrics(eventLedger.readEvents()).trimEnd());
+      return 0;
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 2;
+  }
+}
+
 export function runLedgerCli(subcommand, args, options = {}) {
   if (subcommand === "list") return runLedgerList(args, options);
+  if (subcommand === "metrics") return runLedgerMetrics(args, options);
   console.error(`Unknown ledger subcommand: ${subcommand ?? ""}. ${LEDGER_LIST_USAGE}`);
   return 2;
 }
