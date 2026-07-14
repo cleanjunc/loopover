@@ -86,6 +86,23 @@ describe("scanForSecrets", () => {
     expect(scanForSecrets("fc-" + "c".repeat(16) + "-suffix").kinds).not.toContain("firecrawl_api_key");
   });
 
+  it("flags an OpenAI API key (legacy and modern sk-proj- forms)", () => {
+    expect(scanForSecrets("sk-" + "a".repeat(20) + "T3BlbkFJ" + "b".repeat(20)).kinds).toContain("openai_api_key");
+    expect(scanForSecrets("sk-proj-" + "a".repeat(74) + "T3BlbkFJ" + "b".repeat(74)).kinds).toContain("openai_api_key");
+  });
+
+  it("does not flag an sk- prefixed value missing the T3BlbkFJ watermark", () => {
+    expect(scanForSecrets("sk-" + "a".repeat(48)).kinds).not.toContain("openai_api_key");
+  });
+
+  it("flags an Anthropic API key (sk-ant-api03- + 93-char body + AA)", () => {
+    expect(scanForSecrets("sk-ant-api03-" + "a".repeat(93) + "AA").kinds).toContain("anthropic_api_key");
+  });
+
+  it("does not flag an Anthropic-shaped value below the expected body length", () => {
+    expect(scanForSecrets("sk-ant-api03-" + "a".repeat(92) + "AA").kinds).not.toContain("anthropic_api_key");
+  });
+
   it("flags a generic secret/password/token assignment with a high-entropy value", () => {
     expect(scanForSecrets(`secret = "${GENERIC_VALUE}"`).kinds).toContain("generic_secret_assignment");
     expect(scanForSecrets(`api_key: '${GENERIC_VALUE}'`).kinds).toContain("generic_secret_assignment");
@@ -309,6 +326,8 @@ describe("secret-scan parity with the PR-diff gate (secrets-scan.ts)", () => {
     ["huggingface_token", "hf_" + "a".repeat(34)],
     ["voyage_api_key", "pa-" + "aK9xQ2mZw7Ln4Rv8Pt3B"],
     ["firecrawl_api_key", "fc-" + "aK9xQ2mZw7Ln4Rv8"],
+    ["openai_api_key", "sk-" + "a".repeat(20) + "T3BlbkFJ" + "b".repeat(20)],
+    ["anthropic_api_key", "sk-ant-api03-" + "a".repeat(93) + "AA"],
     ["jwt", jwt],
     ["generic_secret_assignment", `secret = "${GENERIC_VALUE}"`],
     ["lowercase-hyphenated mock fixture (not flagged on either side)", 'token: "mock-response-value"'],

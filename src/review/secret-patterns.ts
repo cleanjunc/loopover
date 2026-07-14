@@ -53,6 +53,16 @@ export const SECRET_PATTERNS: SecretPattern[] = [
   { name: "voyage_api_key", re: /\b(?:pa|al)-[A-Za-z0-9]{20,}(?![A-Za-z0-9_-])/ },
   // Firecrawl API key: `fc-` + base62 body (alnum only; reject hyphen-continued identifiers).
   { name: "firecrawl_api_key", re: /\bfc-[A-Za-z0-9]{16,}(?![A-Za-z0-9_-])/ },
+  // OpenAI API key: legacy `sk-` + 20 chars + `sk-proj-`/`sk-svcacct-`/`sk-admin-` (project/service-account/
+  // admin keys, all real OpenAI key types since the 2024 key-format change) + a longer body, EITHER SIDE of
+  // the literal `T3BlbkFJ` -- the base64 encoding of "OpenAI" that every `sk-*` key embeds mid-body regardless
+  // of surrounding length (verified against gitleaks' maintained openai-api-key rule). OpenAI has changed the
+  // surrounding body length more than once, so this anchors on the watermark rather than an exact length.
+  { name: "openai_api_key", re: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}T3BlbkFJ[A-Za-z0-9_-]{20,}\b/ },
+  // Anthropic API key: `sk-ant-api03-` + a 95-char base64url body (verified against gitleaks' maintained
+  // anthropic-api-key rule; the body's final 2 chars are always literal `AA`, a base64-padding artifact of
+  // the key's fixed underlying byte length).
+  { name: "anthropic_api_key", re: /\bsk-ant-api03-[A-Za-z0-9_-]{93}AA\b/ },
   { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
   { name: "seed_or_mnemonic", re: /\b(?:seed phrase|mnemonic)\b/i },
   { name: "bittensor_key", re: /\b(?:hot|cold)key\b\s*[:=]/i },
@@ -214,6 +224,8 @@ export const HARD_SECRET_KINDS = new Set([
   "huggingface_token",
   "voyage_api_key",
   "firecrawl_api_key",
+  "openai_api_key",
+  "anthropic_api_key",
   "jwt",
 ]);
 

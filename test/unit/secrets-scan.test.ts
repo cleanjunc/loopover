@@ -124,6 +124,44 @@ describe("scanForSecrets — deterministic secret-pattern scanner", () => {
     expect(scanForSecrets("fc-" + "c".repeat(16) + "-suffix").kinds).not.toContain("firecrawl_api_key");
   });
 
+  it("flags a legacy OpenAI API key (sk- + 20 chars + the T3BlbkFJ watermark + 20 chars)", () => {
+    const fakeKey = "sk-" + "a".repeat(20) + "T3BlbkFJ" + "b".repeat(20);
+    expect(scanForSecrets(fakeKey).kinds).toContain("openai_api_key");
+  });
+
+  it.each([
+    ["sk-proj-", "sk-proj-" + "a".repeat(74) + "T3BlbkFJ" + "b".repeat(74)],
+    ["sk-svcacct-", "sk-svcacct-" + "a".repeat(58) + "T3BlbkFJ" + "b".repeat(58)],
+    ["sk-admin-", "sk-admin-" + "a".repeat(58) + "T3BlbkFJ" + "b".repeat(58)],
+  ])("flags a modern OpenAI API key: %s", (_name, fakeKey) => {
+    expect(scanForSecrets(fakeKey).kinds).toContain("openai_api_key");
+  });
+
+  it("does not flag an sk- prefixed value missing the T3BlbkFJ watermark", () => {
+    expect(scanForSecrets("sk-" + "a".repeat(48)).kinds).not.toContain("openai_api_key");
+  });
+
+  it("does not flag an OpenAI-shaped value below the 20-char floor on either side of the watermark", () => {
+    expect(scanForSecrets("sk-" + "a".repeat(19) + "T3BlbkFJ" + "b".repeat(20)).kinds).not.toContain("openai_api_key");
+    expect(scanForSecrets("sk-" + "a".repeat(20) + "T3BlbkFJ" + "b".repeat(19)).kinds).not.toContain("openai_api_key");
+  });
+
+  it("flags an Anthropic API key (sk-ant-api03- + 93-char body + AA)", () => {
+    const fakeKey = "sk-ant-api03-" + "a".repeat(93) + "AA";
+    expect(scanForSecrets(fakeKey).kinds).toContain("anthropic_api_key");
+  });
+
+  it("does not flag an Anthropic-shaped value below the expected body length", () => {
+    expect(scanForSecrets("sk-ant-api03-" + "a".repeat(92) + "AA").kinds).not.toContain("anthropic_api_key");
+  });
+
+  it("does not flag an Anthropic-shaped run that continues one character past the expected body length", () => {
+    // Same overrun shape as the GitLab-token test above: a `\b` terminator correctly rejects a longer run
+    // that happens to contain a 93-char-plus-AA window, since no word boundary follows the extra character.
+    const overrun = "sk-ant-api03-" + "a".repeat(93) + "AA" + "x";
+    expect(scanForSecrets(overrun).kinds).not.toContain("anthropic_api_key");
+  });
+
   it("flags a JWT", () => {
     const fakeJwt = "eyJhbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxMjM0NTY3ODkwIn0" + "." + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
     expect(scanForSecrets(fakeJwt).kinds).toContain("jwt");
