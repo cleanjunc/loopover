@@ -130,6 +130,20 @@ describe("OpenAPI contract", () => {
     expect(spec.paths["/v1/auth/extension/session"]?.post?.security).toEqual([{ LoopOverBearer: [] }, { LoopOverSessionCookie: [] }]);
   });
 
+  // #5810: every operation needs a title in the generated spec and the rendered API browser. Iterating the built
+  // document (rather than counting `summary:` lines in the source) also covers the paths registered from a loop,
+  // and fails loudly when a future route is added without one.
+  it("gives every operation a non-empty summary", () => {
+    const spec = buildOpenApiSpec();
+    for (const [path, methods] of Object.entries(spec.paths ?? {})) {
+      for (const [method, operation] of Object.entries(methods as Record<string, { summary?: string }>)) {
+        const label = `${method.toUpperCase()} ${path}`;
+        expect(typeof operation.summary, `${label} is missing an operation-level summary`).toBe("string");
+        expect(operation.summary?.trim(), `${label} has an empty operation-level summary`).not.toBe("");
+      }
+    }
+  });
+
   it("declares an `in: path` parameter for every {templated} path segment (Cloudflare schema-validation warning 30046)", () => {
     const spec = buildOpenApiSpec();
     for (const [path, methods] of Object.entries(spec.paths ?? {})) {

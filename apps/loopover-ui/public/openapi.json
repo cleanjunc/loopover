@@ -13960,7 +13960,8 @@
               }
             }
           }
-        }
+        },
+        "summary": "Service liveness probe"
       }
     },
     "/v1/mcp/compatibility": {
@@ -13976,7 +13977,8 @@
               }
             }
           }
-        }
+        },
+        "summary": "Public-safe API and MCP client compatibility metadata"
       }
     },
     "/v1/public/stats": {
@@ -13998,7 +14000,8 @@
           "503": {
             "description": "Public stats are temporarily unavailable"
           }
-        }
+        },
+        "summary": "Public homepage aggregate stats"
       }
     },
     "/v1/public/github/repos/{owner}/{repo}/stats": {
@@ -14038,7 +14041,8 @@
           "503": {
             "description": "GitHub repository stats are unavailable"
           }
-        }
+        },
+        "summary": "Public GitHub stars and forks for an allowlisted repository"
       }
     },
     "/v1/public/repos/{owner}/{repo}/quality": {
@@ -14078,7 +14082,8 @@
           "503": {
             "description": "Public quality metrics are temporarily unavailable"
           }
-        }
+        },
+        "summary": "Public repository quality summary for an opted-in repository"
       }
     },
     "/v1/registry/snapshot": {
@@ -14102,7 +14107,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Latest Gittensor registry snapshot"
       }
     },
     "/v1/registry/changes": {
@@ -14126,7 +14132,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Diff between the two latest registry snapshots"
       }
     },
     "/v1/scoring/model": {
@@ -14150,7 +14157,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Latest scoring model snapshot"
       }
     },
     "/v1/upstream/status": {
@@ -14174,7 +14182,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Upstream Gittensor source and ruleset drift status"
       }
     },
     "/v1/upstream/ruleset": {
@@ -14201,7 +14210,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Latest normalized upstream Gittensor ruleset snapshot"
       }
     },
     "/v1/upstream/drift": {
@@ -14244,7 +14254,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Open and historical upstream drift reports"
       }
     },
     "/v1/scoring/preview": {
@@ -14271,7 +14282,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Generate a scoring preview artifact for a candidate contribution"
       }
     },
     "/v1/sync/status": {
@@ -14295,7 +14307,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Repository and installation sync status"
       }
     },
     "/v1/readiness": {
@@ -14319,7 +14332,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Operational readiness summary for the hosted API"
       }
     },
     "/v1/installations": {
@@ -14364,7 +14378,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "List GitHub App installations and their health"
       }
     },
     "/v1/installations/{id}/health": {
@@ -14401,7 +14416,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "GitHub App installation health detail"
       }
     },
     "/v1/installations/{id}/repair": {
@@ -14438,7 +14454,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "GitHub App installation repair diagnostics"
       }
     },
     "/v1/installations/{id}/repair/refresh": {
@@ -14475,7 +14492,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Recompute GitHub App installation repair diagnostics"
       }
     },
     "/v1/app/notification-model": {
@@ -14614,7 +14632,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Opt-in notification model and PWA-readiness metadata"
       }
     },
     "/v1/repos": {
@@ -14641,7 +14660,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "List known repositories"
       }
     },
     "/v1/repos/{owner}/{repo}": {
@@ -14686,7 +14706,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Repository detail"
       }
     },
     "/v1/repos/{owner}/{repo}/intelligence": {
@@ -14728,7 +14749,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Canonical repository intelligence bundle"
       }
     },
     "/v1/repos/{owner}/{repo}/issue-quality": {
@@ -14773,7 +14795,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Repository issue quality report"
       }
     },
     "/v1/repos/{owner}/{repo}/outcome-patterns": {
@@ -14818,7 +14841,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Accepted and rejected pull request outcome patterns for a repository"
       }
     },
     "/v1/repos/{owner}/{repo}/registration-readiness": {
@@ -14860,7 +14884,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Gittensor registration readiness signal for repository owners"
       }
     },
     "/v1/repos/{owner}/{repo}/gittensor-config-recommendation": {
@@ -14902,7 +14927,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Recommended Gittensor configuration for a repository"
       }
     },
     "/v1/repos/{owner}/{repo}/focus-manifest": {
@@ -14950,7 +14976,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Repository focus manifest and compiled policy"
       },
       "put": {
         "parameters": [
@@ -14999,7 +15026,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Persist an API-backed focus manifest for a repository"
       }
     },
     "/v1/repos/{owner}/{repo}/focus-manifest/refresh": {
@@ -15047,7 +15075,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Refresh the persisted focus manifest from the repository file"
       }
     },
     "/v1/repos/{owner}/{repo}/agent/audit-feed": {
@@ -15193,7 +15222,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Maintainer-scoped agent audit feed of executed actions and approval decisions"
       }
     },
     "/v1/repos/{owner}/{repo}/pulls/{number}/incident-reports": {
@@ -15317,7 +15347,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Record a post-merge incident report for a pull request"
       }
     },
     "/v1/app/incident-reports": {
@@ -15427,7 +15458,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Record a post-merge incident report from the operator side"
       }
     },
     "/v1/app/self-dogfood/registration-pack": {
@@ -15457,7 +15489,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Self-dogfood registration pack for the LoopOver repository"
       }
     },
     "/v1/repos/{owner}/{repo}/self-dogfood-registration-pack": {
@@ -15505,7 +15538,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Self-dogfood registration pack when the repository matches the configured target"
       }
     },
     "/v1/repos/{owner}/{repo}/onboarding-pack/preview": {
@@ -15556,7 +15590,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Preview the onboarding pack for an accepted repository"
       }
     },
     "/v1/repos/{owner}/{repo}/contributor-issue-drafts/generate": {
@@ -15607,7 +15642,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Generate maintainer-reviewed contributor issue drafts"
       }
     },
     "/v1/repos/{owner}/{repo}/settings": {
@@ -15649,7 +15685,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Repository automation settings"
       }
     },
     "/v1/repos/{owner}/{repo}/settings-preview": {
@@ -15694,7 +15731,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Dry-run the public surface decision for a sample pull request"
       }
     },
     "/v1/repos/{owner}/{repo}/pulls/{number}/maintainer-packet": {
@@ -15744,7 +15782,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Maintainer review packet for a pull request"
       }
     },
     "/v1/repos/{owner}/{repo}/pulls/{number}/reviewability": {
@@ -15794,7 +15833,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Pull request reviewability score and maintainer action"
       }
     },
     "/v1/contributors/{login}/profile": {
@@ -15828,7 +15868,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Contributor evidence profile"
       }
     },
     "/v1/contributors/{login}/decision-pack": {
@@ -15872,7 +15913,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Canonical contributor decision pack"
       }
     },
     "/v1/contributors/{login}/open-pr-monitor": {
@@ -15906,7 +15948,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Contributor open-PR monitor with classifications and next-step packets"
       }
     },
     "/v1/contributors/{login}/repos/{owner}/{repo}/decision": {
@@ -15966,7 +16009,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Repository-specific contributor decision"
       }
     },
     "/v1/preflight/pr": {
@@ -15993,7 +16037,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Run submission preflight for a pull request"
       }
     },
     "/v1/preflight/local-diff": {
@@ -16020,7 +16065,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Run preflight against a local diff"
       }
     },
     "/v1/local/branch-analysis": {
@@ -16050,7 +16096,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Analyze a local branch for MCP clients"
       }
     },
     "/v1/agent/runs": {
@@ -16080,7 +16127,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue an agent run"
       },
       "get": {
         "parameters": [
@@ -16142,7 +16190,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "List persisted agent runs for an actor"
       }
     },
     "/v1/agent/runs/{id}": {
@@ -16179,7 +16228,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Persisted agent run bundle"
       }
     },
     "/v1/agent/plan-next-work": {
@@ -16219,7 +16269,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Rank the next work items for an agent run"
       }
     },
     "/v1/agent/preflight-branch": {
@@ -16259,7 +16310,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Preflight an agent branch before submission"
       }
     },
     "/v1/agent/prepare-pr-packet": {
@@ -16299,7 +16351,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Prepare a pull request packet for an agent run"
       }
     },
     "/v1/agent/explain-blockers": {
@@ -16339,7 +16392,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Explain an agent run's current blockers"
       }
     },
     "/v1/bounties": {
@@ -16366,7 +16420,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "List known bounty records"
       }
     },
     "/v1/bounties/{id}/advisory": {
@@ -16403,7 +16458,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Bounty lifecycle advisory"
       }
     },
     "/v1/bounties/{id}/lifecycle": {
@@ -16440,7 +16496,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Bounty lifecycle transition history"
       }
     },
     "/v1/github/webhook": {
@@ -16452,7 +16509,8 @@
           "401": {
             "description": "Invalid webhook signature"
           }
-        }
+        },
+        "summary": "Receive a GitHub webhook delivery"
       }
     },
     "/v1/orb/ingest": {
@@ -16472,7 +16530,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Ingest a batch of Orb events"
       }
     },
     "/v1/auth/github/start": {
@@ -16484,7 +16543,8 @@
           "503": {
             "description": "GitHub OAuth app secret is not configured"
           }
-        }
+        },
+        "summary": "Start GitHub web OAuth"
       }
     },
     "/v1/auth/github/callback": {
@@ -16493,7 +16553,8 @@
           "302": {
             "description": "Completes GitHub web OAuth and redirects to the app"
           }
-        }
+        },
+        "summary": "Complete GitHub web OAuth and redirect to the app"
       }
     },
     "/v1/auth/github/device/start": {
@@ -16514,7 +16575,8 @@
           "429": {
             "description": "Rate limited"
           }
-        }
+        },
+        "summary": "Start GitHub device-flow authentication"
       }
     },
     "/v1/auth/github/device/poll": {
@@ -16535,7 +16597,8 @@
           "429": {
             "description": "Rate limited"
           }
-        }
+        },
+        "summary": "Poll a pending GitHub device-flow authorization"
       }
     },
     "/v1/auth/github/session": {
@@ -16556,7 +16619,8 @@
           "429": {
             "description": "Rate limited"
           }
-        }
+        },
+        "summary": "Exchange a GitHub token for a LoopOver session"
       }
     },
     "/v1/auth/logout": {
@@ -16577,7 +16641,8 @@
           "429": {
             "description": "Rate limited"
           }
-        }
+        },
+        "summary": "End the current session"
       }
     },
     "/v1/auth/extension/session": {
@@ -16606,7 +16671,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Create an extension-scoped session"
       }
     },
     "/v1/auth/session": {
@@ -16615,7 +16681,8 @@
           "200": {
             "description": "Current auth session, or signed_out when no app session is present"
           }
-        }
+        },
+        "summary": "Current authentication session"
       }
     },
     "/v1/app/overview": {
@@ -16648,7 +16715,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Live app overview assembled from backend data"
       }
     },
     "/v1/app/roles": {
@@ -16678,7 +16746,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "App roles granted to the current session"
       }
     },
     "/v1/app/miner-dashboard": {
@@ -16708,7 +16777,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Miner dashboard data"
       }
     },
     "/v1/app/maintainer-dashboard": {
@@ -16738,7 +16808,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Maintainer dashboard data"
       }
     },
     "/v1/app/operator-dashboard": {
@@ -16768,7 +16839,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Operator dashboard data"
       }
     },
     "/v1/app/commands": {
@@ -16798,7 +16870,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "@loopover command catalog"
       }
     },
     "/v1/app/commands/usefulness": {
@@ -16828,7 +16901,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "@loopover command usefulness rollup"
       }
     },
     "/v1/app/digest": {
@@ -16858,7 +16932,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Maintainer digest content"
       }
     },
     "/v1/app/analytics/daily-rollups": {
@@ -16888,7 +16963,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Daily analytics rollups"
       }
     },
     "/v1/app/analytics/mcp-compatibility": {
@@ -16918,7 +16994,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "MCP client compatibility analytics"
       }
     },
     "/v1/app/selfhost/queue/dead/{id}/replay": {
@@ -16972,7 +17049,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Replay a dead-letter queue job"
       }
     },
     "/v1/app/selfhost/queue/dead/{id}": {
@@ -17026,7 +17104,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Delete a dead-letter queue job"
       }
     },
     "/v1/app/selfhost/queue/dead": {
@@ -17062,7 +17141,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Purge all dead-letter queue jobs"
       },
       "get": {
         "parameters": [
@@ -17121,7 +17201,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "List dead-letter queue jobs"
       }
     },
     "/v1/app/analytics/weekly-value-report": {
@@ -17200,7 +17281,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Weekly value report"
       }
     },
     "/v1/app/skipped-pr-audit": {
@@ -17284,7 +17366,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Audit of pull requests the review agent skipped"
       }
     },
     "/v1/app/commands/preview": {
@@ -17320,7 +17403,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Dry-run a sanitized @loopover command response"
       }
     },
     "/v1/app/commands/feedback": {
@@ -17366,7 +17450,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Submit feedback on an @loopover command response"
       }
     },
     "/v1/app/digest/subscriptions": {
@@ -17412,7 +17497,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Manage maintainer digest subscriptions"
       }
     },
     "/v1/extension/pull-context": {
@@ -17483,7 +17569,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Pull request context for the browser extension"
       }
     },
     "/v1/internal/jobs/refresh-registry": {
@@ -17503,7 +17590,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a registry refresh job"
       }
     },
     "/v1/internal/jobs/backfill-registered-repos": {
@@ -17523,7 +17611,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a registered-repository backfill job"
       }
     },
     "/v1/internal/jobs/backfill-repo-segment": {
@@ -17546,7 +17635,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a repository segment backfill job"
       }
     },
     "/v1/internal/jobs/backfill-pr-details": {
@@ -17569,7 +17659,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue an open pull request detail backfill job"
       }
     },
     "/v1/internal/jobs/generate-review-recap": {
@@ -17592,7 +17683,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a maintainer review recap digest job"
       }
     },
     "/v1/internal/jobs/refresh-scoring-model": {
@@ -17612,7 +17704,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a scoring model refresh job"
       }
     },
     "/v1/internal/jobs/refresh-upstream-drift": {
@@ -17632,7 +17725,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue an upstream drift refresh job"
       }
     },
     "/v1/internal/jobs/file-upstream-drift-issues": {
@@ -17652,7 +17746,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a job that files upstream drift issues"
       }
     },
     "/v1/internal/jobs/build-contributor-evidence": {
@@ -17672,7 +17767,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a contributor evidence build job"
       }
     },
     "/v1/internal/jobs/build-contributor-decision-packs": {
@@ -17692,7 +17788,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a contributor decision pack build job"
       }
     },
     "/v1/internal/jobs/build-burden-forecasts": {
@@ -17712,7 +17809,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a burden forecast build job"
       }
     },
     "/v1/internal/jobs/generate-signal-snapshots": {
@@ -17732,7 +17830,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a signal snapshot generation job"
       }
     },
     "/v1/internal/jobs/generate-weekly-value-report": {
@@ -17752,7 +17851,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a weekly value report job"
       }
     },
     "/v1/internal/jobs/repair-data-fidelity": {
@@ -17772,7 +17872,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Queue a data fidelity repair job"
       }
     },
     "/v1/internal/bounties/import": {
@@ -17792,7 +17893,8 @@
           {
             "LoopOverSessionCookie": []
           }
-        ]
+        ],
+        "summary": "Import a bounty snapshot"
       }
     }
   },
