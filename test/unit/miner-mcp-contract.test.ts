@@ -210,6 +210,23 @@ const READ_ONLY_TOOLS: ToolContract[] = [
     corrupt: { initGovernorLedger: () => ({ readGovernorDecisions: readThrows, close() {} }) },
     excluded: ["payload", "payload_json", "reputation", "self_plagiarism", "budget"],
   },
+  {
+    tool: "loopover_miner_get_calibration_report",
+    args: {},
+    valid: {
+      initPredictionLedger: () => ({ readPredictions: () => [], close() {} }),
+      initEventLedger: () => ({ dbPath: "", appendEvent: readThrows, readEvents: () => [], purgeByRepo: readThrows, close() {} }),
+    },
+    missing: {
+      initPredictionLedger: openerThrows,
+      initEventLedger: () => ({ dbPath: "", appendEvent: readThrows, readEvents: () => [], purgeByRepo: readThrows, close() {} }),
+    },
+    corrupt: {
+      initPredictionLedger: () => ({ readPredictions: readThrows, close() {} }),
+      initEventLedger: () => ({ dbPath: "", appendEvent: readThrows, readEvents: () => [], purgeByRepo: readThrows, close() {} }),
+    },
+    excluded: [],
+  },
 ];
 
 describe("read-only AMS MCP tool contract (#5199)", () => {

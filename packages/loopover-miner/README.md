@@ -255,7 +255,9 @@ It exposes these read-only tools:
 
 - `loopover_miner_status` (#5154) — read-only status + doctor diagnostics, returning `{ status, doctor }`: `status` = package/engine versions (and skew), node version, state-dir + config-file paths, and the resolved coding-agent driver (provider name, the model **env-var NAME** never its value, CLI-present boolean); `doctor` = the checks `loopover-miner doctor` runs (Docker/CLI presence, config validity, …) as `{ name, ok, detail }`. Reuses `collectStatus` / `runDoctorChecks` so it can't drift from the CLI, and returns only names / booleans / paths — never any env-var value, token, or credential.
 
-This completes the read-only AMS MCP tool surface (status, portfolio, claims, event-ledger, governor-ledger, run-state, plan-store).
+- `loopover_miner_get_calibration_report` (#5821) — read-only miner-local prediction-accuracy report: per-project merge/close precision, joining this miner's own recorded gate predictions (prediction ledger) with the realized PR outcomes it later observed (`pr_outcome` events). Wraps `calibration-cli.js`'s existing `toPredictionRecords` / `toOutcomeRecords` mappers and `calibration.js`'s `buildCalibrationReport` composer — no new join/scoring logic. Strictly local and offline; distinct from ORB's hosted, maintainer-authenticated `loopover_get_outcome_calibration` tool, which reads a different (D1) data source.
+
+This completes the read-only AMS MCP tool surface (status, portfolio, claims, event-ledger, governor-ledger, run-state, plan-store, calibration).
 
 ### Client config
 
@@ -276,7 +278,7 @@ This completes the read-only AMS MCP tool surface (status, portfolio, claims, ev
 }
 ```
 
-`loopover` exposes ORB's hosted contributor-workflow tools (issue ranking, PR packet prep, decision packs). `loopover-miner` exposes AMS's own local state-visibility tools listed above (portfolio dashboard, claims, audit feed, run state, plans) — a fully separate, 100% local tool surface with no shared code or network calls between the two. Both follow the same `loopover_*` tool-naming convention (`loopover_...` vs. `loopover_miner_...`), but back onto different stores: ORB's tools read the hosted loopover backend, AMS's tools read this machine's own local SQLite files (see [Local storage](#local-storage)) — a handful of AMS tools even name the ORB tool they mirror (e.g. `loopover_miner_get_run_state` is the read-only analog of `loopover_get_automation_state`) so the relationship is explicit at the point of use, not just here.
+`loopover` exposes ORB's hosted contributor-workflow tools (issue ranking, PR packet prep, decision packs). `loopover-miner` exposes AMS's own local state-visibility tools listed above (portfolio dashboard, claims, audit feed, run state, plans, calibration) — a fully separate, 100% local tool surface with no shared code or network calls between the two. Both follow the same `loopover_*` tool-naming convention (`loopover_...` vs. `loopover_miner_...`), but back onto different stores: ORB's tools read the hosted loopover backend, AMS's tools read this machine's own local SQLite files (see [Local storage](#local-storage)) — a handful of AMS tools even name the ORB tool they mirror (e.g. `loopover_miner_get_run_state` is the read-only analog of `loopover_get_automation_state`) so the relationship is explicit at the point of use, not just here.
 
 ## Version check
 

@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { EventLedger } from "../lib/event-ledger.js";
+import type { PredictionLedgerEntry } from "../lib/prediction-ledger.js";
 
 /** The static, non-secret payload the loopover_miner_ping tool always returns, independent of input. */
 export const MINER_PING_STATUS: { status: "ok"; tool: "loopover_miner_ping" };
@@ -52,13 +53,21 @@ export interface MinerMcpServerOptions {
   collectStatus?: () => unknown;
   /** Override the doctor-checks reader (defaults to status.js's runDoctorChecks); injection seam for tests. */
   runDoctorChecks?: () => unknown[];
+  /**
+   * Override the prediction-ledger opener (defaults to the real on-disk ledger); injection seam for tests. Typed
+   * to the minimal read surface the calibration-report tool uses (never appendPrediction).
+   */
+  initPredictionLedger?: () => {
+    readPredictions(filter?: { repoFullName?: string | null }): PredictionLedgerEntry[];
+    close(): void;
+  };
 }
 
 /**
  * Build the miner MCP server with its tools registered (loopover_miner_ping,
  * loopover_miner_get_portfolio_dashboard, loopover_miner_list_claims, loopover_miner_get_audit_feed,
  * loopover_miner_get_run_state, loopover_miner_list_plans, loopover_miner_get_plan,
- * loopover_miner_get_governor_decisions, loopover_miner_status). `options` supplies test injection seams;
- * production callers pass nothing.
+ * loopover_miner_get_governor_decisions, loopover_miner_status, loopover_miner_get_calibration_report). `options`
+ * supplies test injection seams; production callers pass nothing.
  */
 export function createMinerMcpServer(options?: MinerMcpServerOptions): McpServer;

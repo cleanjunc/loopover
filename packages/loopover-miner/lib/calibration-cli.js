@@ -11,8 +11,9 @@ import { reportCliFailure, describeCliError } from "./cli-error.js";
 const CALIBRATION_USAGE = "Usage: loopover-miner calibration [--json]";
 
 /** Map prediction-ledger rows to predicted-verdict records: the target id becomes a string key and the recorded
- *  prediction verdict is the `conclusion`. */
-function toPredictionRecords(rows) {
+ *  prediction verdict is the `conclusion`. Exported so callers other than this CLI (the MCP calibration-report
+ *  tool, #5821) can build the identical join without re-implementing the mapping. */
+export function toPredictionRecords(rows) {
   return rows.map((row) => ({
     project: row.repoFullName,
     targetId: String(row.targetId),
@@ -23,8 +24,9 @@ function toPredictionRecords(rows) {
 
 /** Reduce the append-only `pr_outcome` event stream to the LATEST observed outcome per (repo, PR), as
  *  observed-outcome records. `recordedAt` comes from the event's own timestamp (always present), so an outcome is
- *  never dropped for lacking a `closedAt`. Malformed payloads are skipped. */
-function toOutcomeRecords(events) {
+ *  never dropped for lacking a `closedAt`. Malformed payloads are skipped. Exported for the same reason as
+ *  {@link toPredictionRecords} above. */
+export function toOutcomeRecords(events) {
   const latest = new Map();
   for (const event of events) {
     if (event?.type !== MINER_PR_OUTCOME_EVENT) continue;

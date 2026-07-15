@@ -92,6 +92,7 @@ describe("loopover-miner MCP server (#5153 scaffold)", () => {
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "loopover_miner_get_audit_feed",
+      "loopover_miner_get_calibration_report",
       "loopover_miner_get_governor_decisions",
       "loopover_miner_get_plan",
       "loopover_miner_get_portfolio_dashboard",

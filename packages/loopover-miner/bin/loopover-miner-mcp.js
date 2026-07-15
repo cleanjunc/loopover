@@ -16,6 +16,9 @@ import { initRunStateStore } from "../lib/run-state.js";
 import { PLAN_STATUSES, openPlanStore } from "../lib/plan-store.js";
 import { initGovernorLedger } from "../lib/governor-ledger.js";
 import { collectStatus, runDoctorChecks } from "../lib/status.js";
+import { buildCalibrationReport } from "../lib/calibration.js";
+import { toOutcomeRecords, toPredictionRecords } from "../lib/calibration-cli.js";
+import { initPredictionLedger } from "../lib/prediction-ledger.js";
 
 // MCP stdio server for @loopover/miner (scaffold #5153). Mirrors the packages/loopover-mcp
 // harness (MCP SDK server + stdio transport). Tools:
@@ -34,6 +37,10 @@ import { collectStatus, runDoctorChecks } from "../lib/status.js";
 //     governor-ledger.js's readGovernorDecisions -- an explicit named-column read that excludes payload_json.
 //   - loopover_miner_status (#5154): read-only status + doctor diagnostics via status.js's collectStatus/
 //     runDoctorChecks (names/booleans/paths only -- never any env-var value, token, key, or credential).
+//   - loopover_miner_get_calibration_report (#5821): read-only miner-local prediction-accuracy report, joining
+//     the prediction ledger with observed pr_outcome events via calibration-cli.js's existing toPredictionRecords/
+//     toOutcomeRecords mappers and calibration.js's buildCalibrationReport composer (no new join logic). Distinct
+//     from ORB's hosted, maintainer-authenticated loopover_get_outcome_calibration tool.
 
 // Read the version from this package's own package.json (always shipped) rather than a hand-synced
 // literal, so a release bump never has a second place to forget -- same approach as the mcp harness.
@@ -261,6 +268,37 @@ export function createMinerMcpServer(options = {}) {
       const status = (options.collectStatus ?? collectStatus)();
       const doctor = (options.runDoctorChecks ?? runDoctorChecks)();
       return { content: [{ type: "text", text: JSON.stringify({ status, doctor }) }] };
+    },
+  );
+  server.registerTool(
+    "loopover_miner_get_calibration_report",
+    {
+      description:
+        "Read-only miner-local prediction-accuracy report: per-project merge/close precision, joining this " +
+        "miner's own recorded gate predictions (prediction ledger) with the realized PR outcomes it later " +
+        "observed (pr_outcome events). Wraps calibration-cli.js's existing toPredictionRecords/toOutcomeRecords " +
+        "mappers and calibration.js's buildCalibrationReport composer -- no new join/scoring logic, no mutation. " +
+        "Strictly local and offline; distinct from ORB's hosted, maintainer-authenticated " +
+        "loopover_get_outcome_calibration tool, which reads a different (D1) data source. Takes no arguments.",
+      inputSchema: {},
+    },
+    async () => {
+      const ownsPredictionLedger = options.initPredictionLedger === undefined;
+      const ownsEventLedger = options.initEventLedger === undefined;
+      let predictionLedger;
+      let eventLedger;
+      try {
+        predictionLedger = (options.initPredictionLedger ?? initPredictionLedger)();
+        eventLedger = (options.initEventLedger ?? initEventLedger)();
+        const report = buildCalibrationReport(
+          toPredictionRecords(predictionLedger.readPredictions()),
+          toOutcomeRecords(eventLedger.readEvents()),
+        );
+        return { content: [{ type: "text", text: JSON.stringify(report) }] };
+      } finally {
+        if (ownsPredictionLedger) predictionLedger?.close();
+        if (ownsEventLedger) eventLedger?.close();
+      }
     },
   );
   return server;
