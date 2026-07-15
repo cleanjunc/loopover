@@ -1860,8 +1860,14 @@ describe("queue processors", () => {
     // read live CI at all, so this repo's checkRunMode: "off" previously meant zero check-run reads too.
     expect(calls).toEqual({ token: 1, permission: 1, minerList: 1, commentGets: 2, commentPatches: 2, checkRuns: 1 });
     expect(patchedBody).toContain("<!-- gittensory-pr-panel:v1 -->");
-    // #6103: the converged renderer shows readiness as a `readiness N/100` status chip, not "Readiness score:" prose.
-    expect(patchedBody).toMatch(/`readiness \d+\/100`/);
+    // #6103: this repo has reviewCheckMode: "off" and no autonomy configured, so gateEvaluation is never
+    // computed -- the renderer now synthesizes a "skipped" gate for rendering purposes only (see
+    // renderUnifiedReviewComment's caller in src/queue/processors.ts), which maps to the "advisory" status.
+    // #6066's readiness-chip rule only shows `readiness N/100` when status === "ready", so it's correctly
+    // absent here -- a chip claiming a readiness score next to an unconfigured/advisory gate would be the
+    // exact contradiction that rule exists to prevent.
+    expect(patchedBody).toContain("Suggested Action - Advisory Only");
+    expect(patchedBody).not.toMatch(/`readiness \d+\/100`/);
     expect(patchedBody).toContain("- [ ] <!-- gittensory-rerun-review:v1 --> Re-run LoopOver review");
     expect(patchedBody).not.toContain("- [x] <!-- gittensory-rerun-review:v1 -->");
     const audit = await env.DB.prepare("select event_type, actor, target_key, outcome from audit_events where event_type = ?")

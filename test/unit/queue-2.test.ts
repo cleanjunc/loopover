@@ -1229,8 +1229,11 @@ describe("queue processors", () => {
     expect(commentBodies[0]).toContain("🟪");
     const finalComment = commentBodies.find((body) => !body.includes("is reviewing"));
     expect(finalComment).toBeDefined();
-    // #6103: the converged renderer shows readiness as a `readiness N/100` status chip, not "Readiness score:" prose.
-    expect(finalComment).toMatch(/`readiness \d+\/100`/);
+    // #6103: CI is still pending in this fixture, so the converged renderer correctly downgrades status to
+    // "held" (manual review recommended) even though the gate itself passes -- #6066's readiness-chip rule
+    // only shows `readiness N/100` when status === "ready", so it's correctly absent here.
+    expect(finalComment).toContain("Suggested Action - Manual Review");
+    expect(finalComment).not.toMatch(/`readiness \d+\/100`/);
     expect(finalComment).not.toContain("stale cached nit");
     expect(finalComment).toContain("did not include a separate narrative summary");
     expect(finalComment).toContain("Add coverage for the new branch.");
@@ -1479,8 +1482,11 @@ describe("queue processors", () => {
     expect(aiRun).not.toHaveBeenCalled();
     expect(commentBodies.length).toBeGreaterThanOrEqual(2);
     const finalComment = commentBodies.find((body) => !body.includes("is reviewing"));
-    // #6103: the converged renderer shows readiness as a `readiness N/100` status chip, not "Readiness score:" prose.
-    expect(finalComment).toMatch(/`readiness \d+\/100`/);
+    // #6103: CI is still pending in this fixture, so the converged renderer correctly downgrades status to
+    // "held" (manual review recommended) even though the gate itself passes -- #6066's readiness-chip rule
+    // only shows `readiness N/100` when status === "ready", so it's correctly absent here.
+    expect(finalComment).toContain("Suggested Action - Manual Review");
+    expect(finalComment).not.toMatch(/`readiness \d+\/100`/);
     expect(finalComment).not.toContain("AI review returned public review text");
     const audit = await env.DB.prepare("select event_type, metadata_json from audit_events where event_type = ?")
       .bind("github_app.ai_review_public_summary_missing")
