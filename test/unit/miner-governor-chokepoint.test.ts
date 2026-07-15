@@ -63,11 +63,15 @@ function throwingProxy(thrown: unknown): unknown {
 describe("evaluateGovernorChokepointGate (#2340)", () => {
   it("records an allow decision to the ledger and advances the rate-limit bucket", () => {
     const ledger = openLedger();
-    const result = evaluateGovernorChokepointGate(baseInput(), { append: (event) => ledger.appendGovernorEvent(event) });
+    const result = evaluateGovernorChokepointGate(baseInput({ rateLimitBackoffAttempts: { "open_pr:acme/widgets": 2 } }), {
+      append: (event) => ledger.appendGovernorEvent(event),
+    });
 
     expect(result.decision.allowed).toBe(true);
     expect(result.recorded.eventType).toBe("allowed");
     expect(result.rateLimitBuckets.global.open_pr?.count).toBe(1);
+    // Only a genuine allow consumes a slot -- and it clears any backoff the prior denials accrued.
+    expect(result.rateLimitBackoffAttempts["open_pr:acme/widgets"]).toBeUndefined();
     expect(ledger.readGovernorEvents({ repoFullName: "acme/widgets" })).toHaveLength(1);
   });
 
@@ -110,6 +114,43 @@ describe("evaluateGovernorChokepointGate (#2340)", () => {
     expect(result.rateLimitBackoffAttempts["open_pr:acme/widgets"]).toBe(1);
   });
 
+  it("REGRESSION: a denial from a stage after rate-limit never consumes a rate-limit bucket slot (#5925)", () => {
+    const ledger = openLedger();
+    // Every stage that runs AFTER rate-limit on the ladder. Each cleared the rate-limit stage -- so
+    // `detail.rateLimit.allowed` is still true on the final decision -- but no real write happened, so the
+    // bucket must not advance for any of them.
+    const laterStages: Array<{ stage: string; overrides: Record<string, unknown> }> = [
+      { stage: "budget_cap", overrides: { capUsage: { budgetSpent: 100, turnsTaken: 0, elapsedMs: 0 } } },
+      { stage: "non_convergence", overrides: { convergenceInput: { attempts: 5, consecutiveFailures: 5, reenqueues: 0, reachedDone: false } } },
+      { stage: "reputation_throttle", overrides: { reputationHistory: { decided: 10, unfavorable: 8 } } },
+      {
+        stage: "self_plagiarism",
+        overrides: {
+          selfPlagiarismCandidate: { repoFullName: "acme/widgets", fingerprint: "fix auth bug login", submittedAt: "2026-07-11T12:00:00Z" },
+          selfPlagiarismRecentSubmissions: [
+            { repoFullName: "acme/widgets", fingerprint: "fix auth bug login", submittedAt: "2026-07-10T12:00:00Z", pullRequestNumber: 42 },
+          ],
+        },
+      },
+      // A calculator that throws after rate-limit already cleared denies with `internal_error` -- same class:
+      // the accumulated rate-limit sub-verdict says "allowed", but nothing was written.
+      { stage: "internal_error", overrides: { capUsage: null } },
+    ];
+
+    for (const { stage, overrides } of laterStages) {
+      const input = baseInput({ ...overrides, rateLimitBackoffAttempts: { "open_pr:acme/widgets": 2 } });
+      const result = evaluateGovernorChokepointGate(input, { append: (event) => ledger.appendGovernorEvent(event) });
+
+      expect(result.decision.stage).toBe(stage);
+      expect(result.decision.detail.rateLimit?.allowed).toBe(true);
+      expect(result.rateLimitBuckets).toBe(input.rateLimitBuckets);
+      expect(result.rateLimitBuckets).toEqual({ global: {}, perRepo: {} });
+      // Backoff is equally untouched: a later-stage denial neither clears an existing backoff nor records one.
+      expect(result.rateLimitBackoffAttempts).toBe(input.rateLimitBackoffAttempts);
+      expect(result.rateLimitBackoffAttempts).toEqual({ "open_pr:acme/widgets": 2 });
+    }
+  });
+
   it("a caller-supplied rateLimitRandomFn is threaded through to the rate-limit calculator", () => {
     const ledger = openLedger();
     let called = false;
@@ -135,40 +176,38 @@ describe("evaluateGovernorChokepointGate (#2340)", () => {
 
   it("a budget-cap denial records to the ledger as denied before non-convergence runs", () => {
     const ledger = openLedger();
-    const result = evaluateGovernorChokepointGate(
-      baseInput({ capUsage: { budgetSpent: 100, turnsTaken: 0, elapsedMs: 0 }, capLimits: { budget: 100, turns: 100, elapsedMs: 1_000_000 } }),
-      { append: (event) => ledger.appendGovernorEvent(event) },
-    );
+    const input = baseInput({ capUsage: { budgetSpent: 100, turnsTaken: 0, elapsedMs: 0 }, capLimits: { budget: 100, turns: 100, elapsedMs: 1_000_000 } });
+    const result = evaluateGovernorChokepointGate(input, { append: (event) => ledger.appendGovernorEvent(event) });
 
     expect(result.decision.allowed).toBe(false);
     expect(result.decision.stage).toBe("budget_cap");
     expect(result.recorded.eventType).toBe("denied");
     expect(result.decision.detail.convergence).toBeUndefined();
+    expect(result.rateLimitBuckets).toBe(input.rateLimitBuckets);
   });
 
   it("a non-convergence denial records to the ledger before reputation/self-plagiarism run", () => {
     const ledger = openLedger();
-    const result = evaluateGovernorChokepointGate(
-      baseInput({ convergenceInput: { attempts: 5, consecutiveFailures: 5, reenqueues: 0, reachedDone: false } }),
-      { append: (event) => ledger.appendGovernorEvent(event) },
-    );
+    const input = baseInput({ convergenceInput: { attempts: 5, consecutiveFailures: 5, reenqueues: 0, reachedDone: false } });
+    const result = evaluateGovernorChokepointGate(input, { append: (event) => ledger.appendGovernorEvent(event) });
 
     expect(result.decision.allowed).toBe(false);
     expect(result.decision.stage).toBe("non_convergence");
     expect(result.recorded.eventType).toBe("denied");
     expect(result.decision.detail.reputation).toBeUndefined();
+    expect(result.rateLimitBuckets).toBe(input.rateLimitBuckets);
   });
 
   it("a reputation-throttle denial records to the ledger as throttled before self-plagiarism runs", () => {
     const ledger = openLedger();
-    const result = evaluateGovernorChokepointGate(baseInput({ reputationHistory: { decided: 10, unfavorable: 8 } }), {
-      append: (event) => ledger.appendGovernorEvent(event),
-    });
+    const input = baseInput({ reputationHistory: { decided: 10, unfavorable: 8 } });
+    const result = evaluateGovernorChokepointGate(input, { append: (event) => ledger.appendGovernorEvent(event) });
 
     expect(result.decision.allowed).toBe(false);
     expect(result.decision.stage).toBe("reputation_throttle");
     expect(result.recorded.eventType).toBe("throttled");
     expect(result.decision.detail.selfPlagiarism).toBeUndefined();
+    expect(result.rateLimitBuckets).toBe(input.rateLimitBuckets);
   });
 
   it("reputation throttle runs but does not throttle on insufficient history, reaching allow", () => {
@@ -209,19 +248,18 @@ describe("evaluateGovernorChokepointGate (#2340)", () => {
 
   it("a self-plagiarism denial records to the ledger as throttled", () => {
     const ledger = openLedger();
-    const result = evaluateGovernorChokepointGate(
-      baseInput({
-        selfPlagiarismCandidate: { repoFullName: "acme/widgets", fingerprint: "fix auth bug login", submittedAt: "2026-07-11T12:00:00Z" },
-        selfPlagiarismRecentSubmissions: [
-          { repoFullName: "acme/widgets", fingerprint: "fix auth bug login", submittedAt: "2026-07-10T12:00:00Z", pullRequestNumber: 42 },
-        ],
-      }),
-      { append: (event) => ledger.appendGovernorEvent(event) },
-    );
+    const input = baseInput({
+      selfPlagiarismCandidate: { repoFullName: "acme/widgets", fingerprint: "fix auth bug login", submittedAt: "2026-07-11T12:00:00Z" },
+      selfPlagiarismRecentSubmissions: [
+        { repoFullName: "acme/widgets", fingerprint: "fix auth bug login", submittedAt: "2026-07-10T12:00:00Z", pullRequestNumber: 42 },
+      ],
+    });
+    const result = evaluateGovernorChokepointGate(input, { append: (event) => ledger.appendGovernorEvent(event) });
 
     expect(result.decision.allowed).toBe(false);
     expect(result.decision.stage).toBe("self_plagiarism");
     expect(result.recorded.eventType).toBe("throttled");
+    expect(result.rateLimitBuckets).toBe(input.rateLimitBuckets);
   });
 
   it("self-plagiarism runs but allows a fingerprint distinct from recent submissions, reaching allow", () => {
