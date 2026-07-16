@@ -374,6 +374,16 @@ jobs:
       - name: Build UI-kit package
         if: ${{ github.event_name == 'push' || needs.changes.outputs.ui == 'true' }}
         run: npm run ui:kit:build
+      # apps/loopover-ui's fumadocs-mdx virtual modules (collections/browser, collections/server, imported by
+      # docs-client-loader.tsx/docs-source.ts) are gitignored generated output, normally produced by npm ci's
+      # own `postinstall` hook -- but "Install dependencies" above is SKIPPED on a node_modules cache hit (the
+      # cached path never includes this output), so a warm-cache run reaches UI lint/typecheck/tests/build with
+      # no collections output at all and fails with "Cannot find module 'collections/browser'". Same class of
+      # gap as "Build UI-kit package" above (a required, gitignored artifact absent on a fresh/cached
+      # checkout); runs unconditionally here so cache hit or miss makes no difference.
+      - name: Generate docs content collections
+        if: ${{ github.event_name == 'push' || needs.changes.outputs.ui == 'true' }}
+        run: npm run postinstall --workspace @loopover/ui
       - name: UI lint
         if: ${{ github.event_name == 'push' || needs.changes.outputs.ui == 'true' }}
         run: npm run ui:lint
