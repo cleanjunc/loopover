@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFsBlobStore } from "../../src/selfhost/blob-store";
 
 describe("createFsBlobStore (#10 — self-host visual screenshot persistence)", () => {
@@ -36,8 +36,34 @@ describe("createFsBlobStore (#10 — self-host visual screenshot persistence)", 
 
   it("rejects a key that escapes the base dir — put throws, get is a safe miss (no traversal)", async () => {
     const store = createFsBlobStore(dir);
-    await expect(store.put("../escape.png", new Uint8Array([1]))).rejects.toThrow(/escapes base dir/);
-    expect(await store.get("../../etc/passwd")).toBeNull(); // the pathFor throw is caught inside get → safe miss
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(store.put("../escape.png", new Uint8Array([1]))).rejects.toThrow(/escapes base dir/);
+      expect(await store.get("../../etc/passwd")).toBeNull(); // the pathFor throw is caught inside get → safe miss
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("logs a path-traversal get distinctly from an ordinary miss (#6283)", async () => {
+    const store = createFsBlobStore(dir);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await store.get("gittensory/shots/missing.png")).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+
+      expect(await store.get("../../etc/passwd")).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(String(warn.mock.calls[0]?.[0]));
+      expect(payload).toMatchObject({
+        level: "warn",
+        event: "selfhost_blob_key_escapes_base_dir",
+        key: "../../etc/passwd",
+        message: expect.stringMatching(/escapes base dir/i),
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("delete removes a stored object — a subsequent get is a miss", async () => {

@@ -19,10 +19,26 @@ export function createFsBlobStore(baseDir: string): R2Bucket {
     return full;
   };
   const store = {
-    /** Stream a stored object's bytes, or null on a miss (ENOENT / unreadable). The serve route reads `.body`. */
+    /** Stream a stored object's bytes, or null on a miss (ENOENT / unreadable). The serve route reads `.body`.
+     *  A path-traversal key still returns null (safe miss for `/loopover/shot`), but is logged distinctly from
+     *  an ordinary miss so probes are visible (#6283) — put/delete keep throwing the same check unguarded. */
     async get(key: string): Promise<R2ObjectBody | null> {
+      let path: string;
       try {
-        const bytes = await readFile(pathFor(key));
+        path = pathFor(key);
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            event: "selfhost_blob_key_escapes_base_dir",
+            key: typeof key === "string" ? key.slice(0, 200) : String(key).slice(0, 200),
+            message: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+          }),
+        );
+        return null;
+      }
+      try {
+        const bytes = await readFile(path);
         return { body: new Response(bytes).body } as unknown as R2ObjectBody;
       } catch {
         return null;
