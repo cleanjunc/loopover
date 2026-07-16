@@ -453,6 +453,28 @@ describe("buildTrivialWhitespaceChurnFinding", () => {
       }),
     ).toMatchObject({ code: "trivial_whitespace_churn" });
   });
+
+  it("REGRESSION (audit finding): a lockfile-dominated dependency bump does not dilute a small genuine source fix into a false trivial-churn flag", () => {
+    // A real single-package bump can churn dozens of lockfile lines for nested resolutions -- this is not
+    // "whitespace-only churn", it's normal dependency-bump noise, and previously drowned out the genuine
+    // 3-line source fix required by the version bump.
+    expect(
+      buildTrivialWhitespaceChurnFinding({
+        changedFiles: [
+          { path: "package-lock.json", additions: 42, deletions: 3 },
+          { path: "src/utils/rateLimiter.ts", additions: 3, deletions: 0 },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  it("still fires when a dependency-manifest-dominated diff has zero actual source lines (the lockfile carve-out doesn't mask genuinely trivial churn)", () => {
+    expect(
+      buildTrivialWhitespaceChurnFinding({
+        changedFiles: [{ path: "package.json", additions: 25, deletions: 20 }],
+      }),
+    ).toBeNull(); // below MIN_CHURN_LINES once the manifest is excluded -- correctly not "churn" at all, not just not "trivial"
+  });
 });
 
 describe("buildIssueSlopAssessment (#533 issue-side triage)", () => {
