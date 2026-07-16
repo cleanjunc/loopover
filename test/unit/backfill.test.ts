@@ -1173,7 +1173,7 @@ describe("GitHub backfill", () => {
   });
 
   it("marks comment, label, and check repair impacts disabled by repo settings", async () => {
-    const env = createTestEnv();
+    const env = createTestEnv({ LOOPOVER_DRIFT_ISSUE_REPO: "unrelated-org/unrelated-repo" });
     await upsertRepositoryFromGitHub(env, { name: "gittensory", full_name: "JSONbored/gittensory", private: true, owner: { login: "JSONbored" } }, 123);
     await upsertRepositorySettings(env, {
       repoFullName: "JSONbored/gittensory",
@@ -1250,7 +1250,7 @@ describe("GitHub backfill", () => {
   });
 
   it("repair diagnostics require contents:write for merge autonomy (#audit-install-health display)", async () => {
-    const env = createTestEnv();
+    const env = createTestEnv({ LOOPOVER_DRIFT_ISSUE_REPO: "unrelated-org/unrelated-repo" });
     await upsertRepositoryFromGitHub(env, { name: "gittensory", full_name: "JSONbored/gittensory", private: true, owner: { login: "JSONbored" } }, 123);
     await upsertRepositorySettings(env, { repoFullName: "JSONbored/gittensory", autonomy: { merge: "auto" } });
     // Force a deterministic 404 -- otherwise the manifest resolver's live fetch for "JSONbored/gittensory"'s
