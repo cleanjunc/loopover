@@ -1,4 +1,4 @@
-import { isCodeFile, isTestFile, classifyChangedFile } from "./path-matchers.js";
+import { isCodeFile, isTestFile, classifyChangedFile, type ChangedFileCategory } from "./path-matchers.js";
 import { hasLocalTestEvidence, isTestPath } from "./test-evidence.js";
 import { isFocusManifestPublicSafe } from "../focus-manifest.js";
 import type { AdvisoryFinding } from "../types/predicted-gate-types.js";
@@ -317,22 +317,33 @@ export function buildTrivialWhitespaceChurnFinding(input: SlopAssessmentInput): 
   return buildTrivialChurnFinding(lineTotals.changedLineCount, lineTotals.nonCodeLineCount);
 }
 
+// Lockfiles and dependency manifests never count toward trivial-churn detection: a routine dependency bump
+// (package-lock.json alone can churn dozens of lines for one nested resolution change) was diluting the
+// substantive-share ratio and falsely flagging an otherwise-small, legitimate accompanying source fix as
+// "trivial whitespace churn" -- neither category is `isCodeFile`, so their lines were previously falling
+// straight into nonCodeLineCount. Deliberately narrower than the sibling buildNonSubstantivePaddingFinding's
+// own carve-out (which also exempts config/docs): whether a large PURE docs/config diff with zero source or
+// test lines should still trip this specific "low-effort churn" detector is a separate product judgment call
+// this fix does not make -- see the existing "still fires for non-code-only high-churn diffs" test below,
+// which this deliberately leaves unchanged.
+const CHURN_EXEMPT_CATEGORIES = new Set<ChangedFileCategory>(["lockfile", "dependency_manifest"]);
+
 function summarizeChangedLines(changedFiles: SlopChangedFile[]): {
   changedLineCount: number;
   sourceLineCount: number;
   testLineCount: number;
   nonCodeLineCount: number;
 } {
-  const changedLineCount = changedFiles.reduce(
-    (sum, file) => sum + nonNegative(file.additions) + nonNegative(file.deletions),
-    0,
-  );
-  const sourceLineCount = changedFiles
-    .filter((file) => isCodeFile(file.path))
-    .reduce((sum, file) => sum + nonNegative(file.additions) + nonNegative(file.deletions), 0);
-  const testLineCount = changedFiles
-    .filter((file) => isTestFile(file.path))
-    .reduce((sum, file) => sum + nonNegative(file.additions) + nonNegative(file.deletions), 0);
+  let changedLineCount = 0;
+  let sourceLineCount = 0;
+  let testLineCount = 0;
+  for (const file of changedFiles) {
+    if (CHURN_EXEMPT_CATEGORIES.has(classifyChangedFile(file.path))) continue;
+    const lines = nonNegative(file.additions) + nonNegative(file.deletions);
+    changedLineCount += lines;
+    if (isCodeFile(file.path)) sourceLineCount += lines;
+    if (isTestFile(file.path)) testLineCount += lines;
+  }
   const nonCodeLineCount = Math.max(0, changedLineCount - sourceLineCount - testLineCount);
   return { changedLineCount, sourceLineCount, testLineCount, nonCodeLineCount };
 }
