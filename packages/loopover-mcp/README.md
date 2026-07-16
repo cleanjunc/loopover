@@ -78,7 +78,7 @@ loopover-mcp --stdio
 `loopover-mcp version` (aliases `--version` and `-v`) prints the installed package version, the targeted API version, and the Node.js runtime version:
 
 ```text
-@loopover/mcp/0.5.0 (api 0.1.0, node v22.12.0)
+@loopover/mcp/3.0.0 (api 0.1.0, node v22.12.0)
 ```
 
 Add `--json` for machine-readable output:
@@ -86,7 +86,7 @@ Add `--json` for machine-readable output:
 ```json
 {
   "name": "@loopover/mcp",
-  "version": "0.5.0",
+  "version": "3.0.0",
   "apiVersion": "0.1.0",
   "node": "v22.12.0"
 }
