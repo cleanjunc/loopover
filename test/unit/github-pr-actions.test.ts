@@ -14,16 +14,22 @@ describe("GitHub PR action primitives (#778)", () => {
   });
 
   it("validates the repo name before any GitHub call", async () => {
-    await expect(closePullRequest(createTestEnv(), 1, "invalid", 4)).rejects.toThrow(/Invalid repository full name/);
-    await expect(closePullRequest(createTestEnv(), 1, "owner/repo/extra", 4)).rejects.toThrow(
+    // Every malformed name below is rejected by splitRepo() (src/github/pr-actions.ts) before
+    // closePullRequest ever touches `env`, so one shared env per env-shape covers every case without
+    // rebuilding a fresh in-memory SQLite database (166-migration replay, see test/helpers/d1.ts) or
+    // generating a fresh RSA-2048 key (real synchronous CPU work) on every call -- that redundant
+    // setup, not the code under test, is what timed this test out under concurrent full-suite load.
+    const env = createTestEnv();
+    await expect(closePullRequest(env, 1, "invalid", 4)).rejects.toThrow(/Invalid repository full name/);
+    await expect(closePullRequest(env, 1, "owner/repo/extra", 4)).rejects.toThrow(
       /Invalid repository full name/,
     );
-    await expect(closePullRequest(createTestEnv(), 1, " owner/repo ", 4)).rejects.toThrow(
+    await expect(closePullRequest(env, 1, " owner/repo ", 4)).rejects.toThrow(
       /Invalid repository full name/,
     );
     // Per-segment padding (#6613) — mirrors assignees.ts parseRepoFullName coverage.
     for (const padded of ["owner/ repo", "owner /repo"]) {
-      await expect(closePullRequest(createTestEnv(), 1, padded, 4)).rejects.toThrow(
+      await expect(closePullRequest(env, 1, padded, 4)).rejects.toThrow(
         /Invalid repository full name/,
       );
     }
@@ -32,14 +38,15 @@ describe("GitHub PR action primitives (#778)", () => {
       called = true;
       return Response.json({ token: "t" });
     });
-    await expect(closePullRequest(envWithKey(), 1, "owner/repo/extra", 4)).rejects.toThrow(
+    const keyedEnv = envWithKey();
+    await expect(closePullRequest(keyedEnv, 1, "owner/repo/extra", 4)).rejects.toThrow(
       /Invalid repository full name/,
     );
-    await expect(closePullRequest(envWithKey(), 1, " owner/repo ", 4)).rejects.toThrow(
+    await expect(closePullRequest(keyedEnv, 1, " owner/repo ", 4)).rejects.toThrow(
       /Invalid repository full name/,
     );
     for (const padded of ["owner/ repo", "owner /repo"]) {
-      await expect(closePullRequest(envWithKey(), 1, padded, 4)).rejects.toThrow(
+      await expect(closePullRequest(keyedEnv, 1, padded, 4)).rejects.toThrow(
         /Invalid repository full name/,
       );
     }

@@ -11,12 +11,19 @@ describe("GitHub PR labels", () => {
   });
 
   it("rejects invalid repository names before making GitHub calls", async () => {
-    await expect(ensurePullRequestLabel(createTestEnv(), 123, "invalid", 4, "gittensor", { createMissingLabel: true })).rejects.toThrow(/Invalid repository full name/);
-    await expect(ensurePullRequestLabel(createTestEnv(), 123, "owner/repo/extra", 4, "gittensor", { createMissingLabel: true })).rejects.toThrow(
+    // Every malformed name below is rejected by parseRepoFullName() (src/github/labels.ts) before
+    // ensurePullRequestLabel ever touches `env`, so one shared env per env-shape covers every case
+    // without rebuilding a fresh in-memory SQLite database (166-migration replay, see
+    // test/helpers/d1.ts) or generating a fresh RSA-2048 key (real synchronous CPU work) on every
+    // iteration -- that redundant setup, not the code under test, is what timed this test out under
+    // concurrent full-suite load.
+    const env = createTestEnv();
+    await expect(ensurePullRequestLabel(env, 123, "invalid", 4, "gittensor", { createMissingLabel: true })).rejects.toThrow(/Invalid repository full name/);
+    await expect(ensurePullRequestLabel(env, 123, "owner/repo/extra", 4, "gittensor", { createMissingLabel: true })).rejects.toThrow(
       /Invalid repository full name/,
     );
     for (const padded of [" owner/repo ", "owner/ repo", "owner /repo", "own er/repo"]) {
-      await expect(ensurePullRequestLabel(createTestEnv(), 123, padded, 4, "gittensor", { createMissingLabel: true })).rejects.toThrow(
+      await expect(ensurePullRequestLabel(env, 123, padded, 4, "gittensor", { createMissingLabel: true })).rejects.toThrow(
         /Invalid repository full name/,
       );
     }
@@ -25,10 +32,11 @@ describe("GitHub PR labels", () => {
       called = true;
       return Response.json({ token: "t" });
     });
+    const keyedEnv = createTestEnv({ GITHUB_APP_PRIVATE_KEY: generateRsaPrivateKeyPem() });
     for (const malformed of ["owner/repo/extra", "owner/ repo", "owner /repo"]) {
       await expect(
         ensurePullRequestLabel(
-          createTestEnv({ GITHUB_APP_PRIVATE_KEY: generateRsaPrivateKeyPem() }),
+          keyedEnv,
           123,
           malformed,
           4,
