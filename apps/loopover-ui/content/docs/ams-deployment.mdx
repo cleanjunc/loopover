@@ -237,6 +237,18 @@ sends SIGTERM, which the loop handles cleanly at its next kill-switch check.
 - Discovery/ranking primitives that touch GitHub only run when explicitly invoked and only perform
   documented GETs unless a future command says otherwise.
 - Operators own secret injection; images and packages ship without embedded tokens.
+- AMS works against **any** GitHub repository — it does not require ORB installed, gittensor
+  registration, or a `.loopover.yml` file on the target repo to function.
+
+<Callout variant="note" title="Verified against a real, non-gittensor repo">
+  `loopover-miner init`, `doctor`, and `discover <owner/repo>` were run end to end against real
+  public GitHub repositories with no `.loopover.yml` and no gittensor registration, using only a
+  plain `GITHUB_TOKEN` — every step worked as documented, including correctly returning zero
+  candidates on a repo with no open issues and ranking real issues on repos that had them. The
+  `loopover-mcp login` device-flow session path (a separate mechanism from AMS's own credential
+  resolution) currently has a known reliability issue independent of AMS itself — see the linked
+  issue tracker for status before relying on it for unattended AMS setups.
+</Callout>
 
 For operational scenarios (ledger corruption, two miners on one state dir, post-upgrade schema
 migration) see the [AMS operations runbook](/docs/ams-operations-runbook), and for measured
