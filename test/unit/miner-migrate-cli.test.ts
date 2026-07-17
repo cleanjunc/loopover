@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runMigrate, runMigrateChecks } from "../../packages/loopover-miner/lib/migrate-cli.js";
 import { initPortfolioQueueStore, resolvePortfolioQueueDbPath } from "../../packages/loopover-miner/lib/portfolio-queue.js";
 import { resolveEventLedgerDbPath } from "../../packages/loopover-miner/lib/event-ledger.js";
+import { applySchemaMigrations, BASELINE_SCHEMA_VERSION } from "../../packages/loopover-miner/lib/schema-version.js";
 
 const roots: string[] = [];
 
@@ -139,6 +140,59 @@ describe("loopover-miner migrate (#4871)", () => {
     expect(results).toEqual([
       { name: "fake-store", dbPath, ok: false, status: "failed", detail: "boom", versionBefore: 0, versionAfter: 0 },
     ]);
+  });
+
+  it("REGRESSION: reports the REAL post-failure version when a migration fails part-way through a multi-migration sequence (#6767)", () => {
+    const env = tempEnv();
+    const dbPath = join(dirname(resolvePortfolioQueueDbPath(env)), "partial-migration.sqlite3");
+    mkdirSync(dirname(dbPath), { recursive: true });
+    // Seed a real, openable file stamped at the baseline version -- this is what versionBefore reads.
+    const seed = new DatabaseSync(dbPath);
+    try {
+      applySchemaMigrations(seed, []);
+    } finally {
+      seed.close();
+    }
+
+    const results = runMigrateChecks(env, [
+      {
+        name: "partial-migration",
+        resolveDbPath: () => dbPath,
+        open: () => {
+          const db = new DatabaseSync(dbPath);
+          try {
+            // applySchemaMigrations applies AND stamps each migration in its own transaction: the first one
+            // COMMITS (stamping BASELINE+1) and the second throws, so the file really is left at BASELINE+1.
+            applySchemaMigrations(db, [
+              (migrationDb: DatabaseSync) => migrationDb.exec("CREATE TABLE first_ok (id INTEGER)"),
+              () => {
+                throw new Error("second migration boom");
+              },
+            ]);
+          } finally {
+            db.close();
+          }
+          // Unreachable: applySchemaMigrations always throws for this fixture. Present only to satisfy the
+          // store contract's `open(dbPath) => { close() }` return type.
+          return { close: () => {} };
+        },
+      },
+    ]);
+
+    const result = results[0];
+    expect(result).toMatchObject({ name: "partial-migration", ok: false, status: "failed" });
+    expect(result?.versionBefore).toBe(BASELINE_SCHEMA_VERSION);
+    // The bug: the catch branch hardcoded `versionAfter: versionBefore`, reporting "nothing changed" even
+    // though the first migration had already committed to disk.
+    expect(result?.versionAfter).toBe(BASELINE_SCHEMA_VERSION + 1);
+
+    // ...and the reported version is the one actually on disk, not an assumption.
+    const verifyDb = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      expect(verifyDb.prepare("PRAGMA user_version").get()?.user_version).toBe(BASELINE_SCHEMA_VERSION + 1);
+    } finally {
+      verifyDb.close();
+    }
   });
 
   it("runMigrate prints human-readable text (exit 0) and machine JSON with --json, and exits 1 when a store fails", () => {

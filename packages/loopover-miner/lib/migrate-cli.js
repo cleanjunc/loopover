@@ -81,6 +81,18 @@ function migrateStore({ name, resolveDbPath, open }, env) {
       versionAfter,
     };
   } catch (error) {
+    // applySchemaMigrations applies AND stamps each migration in its OWN transaction, so a failure part-way
+    // through a multi-migration sequence leaves the file at the LAST fully-applied version -- genuinely AHEAD
+    // of versionBefore. Re-read the real on-disk version instead of reporting a misleading "nothing changed".
+    // Guarded by its own try: the failure may itself be an unreadable/corrupt file (the same reason
+    // versionBefore can still be null here), in which case the pre-failure reading is all we can honestly
+    // report.
+    let versionAfter = versionBefore;
+    try {
+      versionAfter = peekSchemaVersion(dbPath);
+    } catch {
+      versionAfter = versionBefore;
+    }
     return {
       name,
       dbPath,
@@ -88,7 +100,7 @@ function migrateStore({ name, resolveDbPath, open }, env) {
       status: "failed",
       detail: error instanceof Error ? error.message : String(error),
       versionBefore,
-      versionAfter: versionBefore,
+      versionAfter,
     };
   }
 }
