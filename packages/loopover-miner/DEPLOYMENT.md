@@ -180,6 +180,7 @@ Want the dashboard too? [`systemd/loopover-miner-ui.service.example`](../../syst
 - `loopover-miner status` and `loopover-miner doctor` make **no network calls**.
 - Discovery/ranking primitives that touch GitHub only run when explicitly invoked and only perform documented GETs unless a future command says otherwise.
 - Operators own secret injection; images and packages ship without embedded tokens.
+- AMS works against **any** GitHub repository — it does not require ORB installed, gittensor registration, or a `.loopover.yml` file on the target repo to function. Verified end to end (`init`, `doctor`, `discover <owner/repo>`) against real public repositories with no `.loopover.yml` and no gittensor registration, using only a plain `GITHUB_TOKEN`.
 
 See [`docs/operations-runbook.md`](docs/operations-runbook.md) for operational scenarios: ledger corruption, two miners on one state dir, and post-upgrade schema migration ([#4875](https://github.com/JSONbored/gittensory/issues/4875)).
 
