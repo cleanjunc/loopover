@@ -378,6 +378,31 @@ describe("advisory rules", () => {
     expect(output.text).not.toMatch(/reward|wallet|trust score|score estimate/i);
   });
 
+  it("redacts the terms sanitizePublicComment already caught but CHECK_RUN_FORBIDDEN_TERMS missed (#7074)", () => {
+    const advisory = buildPullRequestAdvisory(repo, null);
+    const gate = evaluateGateCheck(
+      {
+        ...advisory,
+        findings: [
+          {
+            code: "missing_linked_issue",
+            title: "Check for mnemonic and seed phrase leaks across the cohort",
+            severity: "warning" as const,
+            detail: "This is miner-originated, not human-originated, and touches raw trust plus the rankings.",
+          },
+        ],
+      },
+      { linkedIssueGateMode: "block" },
+    );
+    const output = formatGateCheckOutput(gate);
+
+    expect(gate.conclusion).toBe("failure");
+    // None of the newly-added forbidden terms may survive to the public check-run surface.
+    expect(output.text).not.toMatch(/mnemonic|seed\s?phrase|cohort|originated|raw\s+trust|ranking/i);
+    // The static finding scaffolding still renders, so the finding isn't silently dropped.
+    expect(output.text).toContain("[context]");
+  });
+
   it("keeps missing-issue advisory by default, blocks duplicates by default, honoring explicit modes", () => {
     const pr: PullRequestRecord = {
       repoFullName: repo.fullName,
