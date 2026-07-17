@@ -19,7 +19,7 @@ deployment guide](/docs/ams-deployment)):
     {
       title: "attempt-log.sqlite3",
       description:
-        "The driver-level attempt event trace (event type, action class, mode, reason, timestamps), table attempt_log_events. One attempt_outcome_summary row per completed attempt also carries the real configured provider and the real accumulated cost_usd -- tokens_used is always NULL today, an honest gap rather than a fabricated 0: no coding-agent driver reports real token usage yet.",
+        "The driver-level attempt event trace (event type, action class, mode, reason, timestamps), table attempt_log_events. One attempt_outcome_summary row per completed attempt also carries the real configured provider, the real accumulated cost_usd, and the real accumulated tokens_used -- 0, never fabricated, for an attempt whose driver never actually ran or whose provider reports no token signal for a given iteration.",
     },
     {
       title: "prediction-ledger.sqlite3",
