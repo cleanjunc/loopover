@@ -141,7 +141,9 @@ function normalizePositiveNumber(value: unknown, field: string, fallback: number
 }
 
 /** Like normalizePositiveNumber, but floors to a whole count -- for fields that are semantically integer
- *  counts (an iteration/turn budget), matching MinerGoalSpec's own normalizePositiveInteger convention. */
+ *  counts (an iteration/turn budget). Its floor is >= 0: unlike MinerGoalSpec's normalizePositiveInteger
+ *  (which rejects anything < 1 after flooring), 0 is deliberately accepted here (see the parser test's
+ *  zero-budget case) -- a 0 budget is a meaningful "do nothing" setting, not a malformed value. */
 function normalizeNonNegativeInteger(value: unknown, field: string, fallback: number, warnings: string[]): number {
   const normalized = normalizePositiveNumber(value, field, fallback, warnings);
   return Math.floor(normalized);
