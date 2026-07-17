@@ -6011,6 +6011,202 @@ describe("queue processors", () => {
       expect(reuseAudit?.n).toBe(2); // both later passes explicitly reused the durable cache
     });
 
+    it("REGRESSION (#6685): a draft PR's repeat fork-CI-completion triggers stop republishing once the head is already current", async () => {
+      const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: await generatePrivateKeyPem() });
+      // reviewCheckMode: "disabled" reproduces the live incident exactly -- gateEnabled (shouldPublishReviewCheck
+      // && headSha) is false here, so the OLDER check-run-only skip guard (canSkipCurrentSurface, gated on
+      // gateEnabled) never engages; this fix must not depend on it.
+      await seedRegateChurnRepo(env, { publicSurface: "comment_and_label" });
+      await upsertRepoFocusManifest(env, "JSONbored/gittensory", { settings: { commentMode: "all_prs", publicSurface: "comment_and_label", checkRunMode: "off", reviewCheckMode: "disabled", aiReviewMode: "block" }, review: { auto_review: { skip_drafts: true, cadence: "continuous" } } });
+      await upsertPullRequestFromGitHub(env, "JSONbored/gittensory", { number: 90, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: "a90" }, labels: [], body: "Closes #1" } as never);
+      await upsertPullRequestDetailSyncState(env, { repoFullName: "JSONbored/gittensory", pullNumber: 90, status: "complete", reviewsSyncedAt: new Date().toISOString() });
+
+      const stickyComment: { current: { id: number; body: string } | null } = { current: null };
+      let commentPosts = 0;
+      let commentPatches = 0;
+      let labelPosts = 0;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+        const method = init?.method ?? "GET";
+        if (url.includes("/access_tokens")) return Response.json({ token: "fake-installation-token" });
+        if (url.includes("/pulls/90/files")) return Response.json([{ filename: "src/a.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@\n+export const ok = true;" }]);
+        if (url.endsWith("/pulls/90")) return Response.json({ number: 90, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: "a90" }, labels: [], body: "Closes #1", mergeable_state: "clean" });
+        if (url.includes("/commits/a90/check-runs")) return Response.json({ total_count: 0, check_runs: [] });
+        if (url.includes("/commits/a90/status")) return Response.json({ state: "success", statuses: [] });
+        if (url.includes("/issues/1")) return Response.json({ number: 1, title: "Issue", state: "open", labels: [], user: { login: "reporter" } });
+        if (url.includes("/issues/90/comments") && method === "GET") {
+          return Response.json(stickyComment.current ? [{ ...stickyComment.current, user: { login: "gittensory[bot]", type: "Bot" } }] : []);
+        }
+        if (url.includes("/issues/90/comments") && method === "POST") {
+          commentPosts += 1;
+          const body = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+          stickyComment.current = { id: 1, body };
+          return Response.json({ id: 1 }, { status: 201 });
+        }
+        if (url.includes("/issues/comments/1") && method === "PATCH") {
+          commentPatches += 1;
+          const body = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+          stickyComment.current = { id: 1, body };
+          return Response.json({ id: 1 }, { status: 200 });
+        }
+        if (url.includes("/issues/90/labels") && method === "GET") return Response.json([]);
+        if (url.includes("/issues/90/labels") && method === "POST") {
+          labelPosts += 1;
+          return Response.json([]);
+        }
+        if (url.includes("/branches/")) return Response.json({ protected: false, protection: { required_status_checks: { contexts: [] } } });
+        return Response.json({});
+      });
+
+      // First pass: the initial publish for this head -- always goes through in full (a CREATE placeholder,
+      // then a PATCH to the final settled content, mirroring #3379's own first-pass shape).
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-1", repoFullName: "JSONbored/gittensory", prNumber: 90, installationId: 123 });
+      expect(commentPosts).toBe(1);
+      const patchesAfterFirst = commentPatches;
+      const labelPostsAfterFirst = labelPosts;
+      expect(labelPostsAfterFirst).toBeGreaterThan(0);
+
+      // Three more fork-resume passes over the SAME unchanged head SHA (mirroring one webhook per completing
+      // CI job on a fork PR, confirmed live: 12 of these in 29 minutes for JSONbored/loopover#6592).
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-2", repoFullName: "JSONbored/gittensory", prNumber: 90, installationId: 123 });
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-3", repoFullName: "JSONbored/gittensory", prNumber: 90, installationId: 123 });
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-4", repoFullName: "JSONbored/gittensory", prNumber: 90, installationId: 123 });
+
+      expect(commentPosts).toBe(1); // never re-created
+      expect(commentPatches).toBe(patchesAfterFirst); // never rewritten either — the whole publish pass is skipped, not just diffed away
+
+      const publishedAudit = await env.DB.prepare("select count(*) as n from audit_events where event_type = ? and target_key = ?")
+        .bind("github_app.pr_public_surface_published", "JSONbored/gittensory#90")
+        .first<{ n: number }>();
+      expect(publishedAudit?.n).toBe(1); // only the first pass ever counts as a publish
+
+      const skippedAudit = await env.DB.prepare("select count(*) as n from audit_events where event_type = ? and target_key = ?")
+        .bind("github_app.public_surface_publish_skipped_current", "JSONbored/gittensory#90")
+        .first<{ n: number }>();
+      expect(skippedAudit?.n).toBe(3); // all three repeat fork-resume passes were proven redundant up-front
+    });
+
+    it("REGRESSION (#6685): a draft PR's republish-skip does NOT apply once a new commit changes the head, or when a maintainer forces a re-trigger", async () => {
+      const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: await generatePrivateKeyPem() });
+      await seedRegateChurnRepo(env, { publicSurface: "comment_and_label" });
+      await upsertRepoFocusManifest(env, "JSONbored/gittensory", { settings: { commentMode: "all_prs", publicSurface: "comment_and_label", checkRunMode: "off", reviewCheckMode: "disabled", aiReviewMode: "block" }, review: { auto_review: { skip_drafts: true, cadence: "continuous" } } });
+      await upsertPullRequestFromGitHub(env, "JSONbored/gittensory", { number: 91, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: "b91" }, labels: [], body: "Closes #1" } as never);
+      await upsertPullRequestDetailSyncState(env, { repoFullName: "JSONbored/gittensory", pullNumber: 91, status: "complete", reviewsSyncedAt: new Date().toISOString() });
+
+      let headSha = "b91";
+      const stickyComment: { current: { id: number; body: string } | null } = { current: null };
+      let commentPosts = 0;
+      let commentPatches = 0;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+        const method = init?.method ?? "GET";
+        if (url.includes("/access_tokens")) return Response.json({ token: "fake-installation-token" });
+        if (url.includes(`/pulls/91/files`)) return Response.json([{ filename: "src/a.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@\n+export const ok = true;" }]);
+        if (url.endsWith("/pulls/91")) return Response.json({ number: 91, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: headSha }, labels: [], body: "Closes #1", mergeable_state: "clean" });
+        if (url.includes(`/commits/${headSha}/check-runs`)) return Response.json({ total_count: 0, check_runs: [] });
+        if (url.includes(`/commits/${headSha}/status`)) return Response.json({ state: "success", statuses: [] });
+        if (url.includes("/issues/1")) return Response.json({ number: 1, title: "Issue", state: "open", labels: [], user: { login: "reporter" } });
+        if (url.includes("/issues/91/comments") && method === "GET") {
+          return Response.json(stickyComment.current ? [{ ...stickyComment.current, user: { login: "gittensory[bot]", type: "Bot" } }] : []);
+        }
+        if (url.includes("/issues/91/comments") && method === "POST") {
+          commentPosts += 1;
+          const body = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+          stickyComment.current = { id: 1, body };
+          return Response.json({ id: 1 }, { status: 201 });
+        }
+        if (url.includes("/issues/comments/1") && method === "PATCH") {
+          commentPatches += 1;
+          const body = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+          stickyComment.current = { id: 1, body };
+          return Response.json({ id: 1 }, { status: 200 });
+        }
+        if (url.includes("/issues/91/labels") && method === "GET") return Response.json([]);
+        if (url.includes("/issues/91/labels") && method === "POST") return Response.json([]);
+        if (url.includes("/branches/")) return Response.json({ protected: false, protection: { required_status_checks: { contexts: [] } } });
+        return Response.json({});
+      });
+
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-1", repoFullName: "JSONbored/gittensory", prNumber: 91, installationId: 123 });
+      expect(commentPosts).toBe(1);
+      const patchesAfterFirst = commentPatches;
+
+      // A new commit lands (new head SHA) -- the next fork-resume pass must NOT be treated as redundant. A
+      // repeat publish to an EXISTING sticky comment is a PATCH (update in place), not a second POST, so a
+      // real republish shows up as an additional PATCH here, not another create.
+      headSha = "c91";
+      await upsertPullRequestFromGitHub(env, "JSONbored/gittensory", { number: 91, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: headSha }, labels: [], body: "Closes #1" } as never);
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-2", repoFullName: "JSONbored/gittensory", prNumber: 91, installationId: 123 });
+      const patchesAfterNewHead = commentPatches;
+      expect(patchesAfterNewHead).toBeGreaterThan(patchesAfterFirst); // republished (as an update) for the new head, not skipped
+
+      const publishedAfterNewHead = await env.DB.prepare("select count(*) as n from audit_events where event_type = ? and target_key = ?")
+        .bind("github_app.pr_public_surface_published", "JSONbored/gittensory#91")
+        .first<{ n: number }>();
+      expect(publishedAfterNewHead?.n).toBe(2); // the first publish, plus this one for the new head
+
+      // A maintainer explicitly forces a fresh pass over the SAME (now-current) head -- must not be skipped either.
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-3", repoFullName: "JSONbored/gittensory", prNumber: 91, installationId: 123, force: true });
+      expect(commentPatches).toBeGreaterThan(patchesAfterNewHead);
+      const publishedAfterForce = await env.DB.prepare("select count(*) as n from audit_events where event_type = ? and target_key = ?")
+        .bind("github_app.pr_public_surface_published", "JSONbored/gittensory#91")
+        .first<{ n: number }>();
+      expect(publishedAfterForce?.n).toBe(3);
+    });
+
+    it("swallows a failing draft-republish-skip audit write without throwing (#6685)", async () => {
+      const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: await generatePrivateKeyPem() });
+      await seedRegateChurnRepo(env, { publicSurface: "comment_and_label" });
+      await upsertRepoFocusManifest(env, "JSONbored/gittensory", { settings: { commentMode: "all_prs", publicSurface: "comment_and_label", checkRunMode: "off", reviewCheckMode: "disabled", aiReviewMode: "block" }, review: { auto_review: { skip_drafts: true, cadence: "continuous" } } });
+      await upsertPullRequestFromGitHub(env, "JSONbored/gittensory", { number: 92, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: "d92" }, labels: [], body: "Closes #1" } as never);
+      await upsertPullRequestDetailSyncState(env, { repoFullName: "JSONbored/gittensory", pullNumber: 92, status: "complete", reviewsSyncedAt: new Date().toISOString() });
+
+      const stickyComment: { current: { id: number; body: string } | null } = { current: null };
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+        const method = init?.method ?? "GET";
+        if (url.includes("/access_tokens")) return Response.json({ token: "fake-installation-token" });
+        if (url.includes("/pulls/92/files")) return Response.json([{ filename: "src/a.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@\n+export const ok = true;" }]);
+        if (url.endsWith("/pulls/92")) return Response.json({ number: 92, title: "Draft feature", state: "open", draft: true, user: { login: "contributor" }, head: { sha: "d92" }, labels: [], body: "Closes #1", mergeable_state: "clean" });
+        if (url.includes("/commits/d92/check-runs")) return Response.json({ total_count: 0, check_runs: [] });
+        if (url.includes("/commits/d92/status")) return Response.json({ state: "success", statuses: [] });
+        if (url.includes("/issues/1")) return Response.json({ number: 1, title: "Issue", state: "open", labels: [], user: { login: "reporter" } });
+        if (url.includes("/issues/92/comments") && method === "GET") {
+          return Response.json(stickyComment.current ? [{ ...stickyComment.current, user: { login: "gittensory[bot]", type: "Bot" } }] : []);
+        }
+        if (url.includes("/issues/92/comments") && method === "POST") {
+          const body = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+          stickyComment.current = { id: 1, body };
+          return Response.json({ id: 1 }, { status: 201 });
+        }
+        if (url.includes("/issues/comments/1") && method === "PATCH") {
+          const body = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+          stickyComment.current = { id: 1, body };
+          return Response.json({ id: 1 }, { status: 200 });
+        }
+        if (url.includes("/issues/92/labels") && method === "GET") return Response.json([]);
+        if (url.includes("/issues/92/labels") && method === "POST") return Response.json([]);
+        if (url.includes("/branches/")) return Response.json({ protected: false, protection: { required_status_checks: { contexts: [] } } });
+        return Response.json({});
+      });
+
+      // First pass publishes for real (populating lastPublishedSurfaceSha).
+      await processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-1", repoFullName: "JSONbored/gittensory", prNumber: 92, installationId: 123 });
+
+      const originalRecordAuditEvent = repositoriesModule.recordAuditEvent;
+      const auditSpy = vi.spyOn(repositoriesModule, "recordAuditEvent").mockImplementation(async (auditEnv, event) => {
+        if (event.eventType === "github_app.public_surface_publish_skipped_current") throw new Error("audit DB down");
+        await originalRecordAuditEvent(auditEnv, event);
+      });
+
+      // The second (repeat, same-head) pass takes the draft-skip path -- its audit write fails, but the job
+      // must still resolve cleanly rather than throwing.
+      await expect(
+        processJob(env, { type: "agent-regate-pr", deliveryId: "fork-resume-2", repoFullName: "JSONbored/gittensory", prNumber: 92, installationId: 123 }),
+      ).resolves.toBeUndefined();
+      auditSpy.mockRestore();
+    });
+
     it("a PURE base-branch movement (no reviewed content change) triggers neither a fresh AI review nor a comment rewrite", async () => {
       let aiCalls = 0;
       const env = createTestEnv({

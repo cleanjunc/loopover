@@ -8298,6 +8298,9 @@ async function maybePublishPrPublicSurface(
   let aiReviewExpected = false;
   let aiReviewWasReused = false;
   let gateFinalized = false;
+  // #6685: hoisted the same way aiReviewExpected/aiReviewWasReused are above -- assigned inside the try block
+  // below, read at the draft-republish skip check past it (autoReviewSkipReason itself is try-block-scoped).
+  let autoReviewSkipReasonForPublish: string | null = null;
   const publishedOutputs: PublicSurfaceOutput[] = [];
   const failedOutputs: PublicSurfaceOutputFailure[] = [];
   const reviewedHeadSha = reviewedPullRequestHeadSha(pr.headSha, advisory.headSha);
@@ -8907,6 +8910,7 @@ async function maybePublishPrPublicSurface(
       addedLineCount: autoReviewAddedLineCount,
       changedFileCount: autoReviewChangedFileCount,
     }));
+    autoReviewSkipReasonForPublish = autoReviewSkipReason;
     // review.changed_files_summary (#1957) + review.effort_score (#1955): both deterministic, no-AI — resolve
     // them here, UNCONDITIONALLY, rather than inside the aiReviewWillRun-gated closure below. These sections
     // must still render whenever the manifest opts in even when the AI review itself is skipped this pass
@@ -10002,6 +10006,35 @@ async function maybePublishPrPublicSurface(
   if (!prelimHasPublicOutput) return finishPublicSurfacePublication();
   if (publicSurfaceSkipped || !official || !author)
     return finishPublicSurfacePublication();
+  // #6685 (review-burst): a draft fork PR's own CI produces one check_run.completed webhook per job (each
+  // arriving with an empty pull_requests[] payload, forcing the fork-resume fallback in webhook-coalesce.ts
+  // to re-run this whole pass), so a multi-job CI run on a draft PR republished the SAME surface once per
+  // completing job even though nothing about the PR changed between them -- confirmed live, 12 identical
+  // republishes of JSONbored/loopover#6592 in 29 minutes. autoReviewSkipReason === "review skipped (draft)"
+  // is a deterministic signal (from pr.isDraft + config, resolved before any AI/cache call) that this pass
+  // has nothing new to report from the review dimension; a matching lastPublishedSurfaceSha proves the head
+  // hasn't moved since the last full publish either. Together they're a provable no-op for the draft case
+  // specifically -- narrower than, and independent of, the check-run-only skip above (canSkipCurrentSurface
+  // requires gateEnabled, which is false fleet-wide here since reviewCheckMode is disabled), so this applies
+  // regardless of publicSurface/gateEnabled. !forceAiReview preserves an explicit maintainer re-trigger the
+  // same way that guard does.
+  if (
+    autoReviewSkipReasonForPublish === "review skipped (draft)" &&
+    !webhook.forceAiReview &&
+    advisory.headSha &&
+    advisory.headSha === pr.lastPublishedSurfaceSha
+  ) {
+    incr("loopover_public_surface_publish_skipped_current_total");
+    await recordAuditEvent(env, {
+      eventType: "github_app.public_surface_publish_skipped_current",
+      actor: author,
+      targetKey: `${repoFullName}#${pr.number}`,
+      outcome: "completed",
+      detail: "draft PR already current for this head; skipped republish",
+      metadata: { deliveryId: webhook.deliveryId, repoFullName, headSha: advisory.headSha },
+    }).catch(() => undefined);
+    return finishPublicSurfacePublication();
+  }
 
   const [github] = await Promise.all([
     fetchPublicContributorProfile(author, env),
