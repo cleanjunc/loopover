@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveEventLedgerDbPath } from "../../packages/loopover-miner/lib/event-ledger.js";
@@ -19,6 +19,14 @@ import {
   runStatus,
 } from "../../packages/loopover-miner/lib/status.js";
 import { initLaptopState } from "../../packages/loopover-miner/lib/laptop-init.js";
+
+// Read live, never hardcode: a hardcoded snapshot of this range (e.g. "^3.0.0") goes stale the moment
+// packages/loopover-miner/package.json's @loopover/engine dependency is bumped by a real release, and
+// silently starts asserting the WRONG expected value instead of failing loudly (confirmed live: the
+// linked-versions release group, #7123, bumped it to ^3.2.1 and broke a hardcoded "^3.0.0" here).
+const DECLARED_ENGINE_DEPENDENCY_RANGE: string = JSON.parse(
+  readFileSync("packages/loopover-miner/package.json", "utf8"),
+).dependencies["@loopover/engine"];
 
 const roots: string[] = [];
 
@@ -66,7 +74,7 @@ describe("loopover-miner status/doctor (#2288)", () => {
     // A self-hoster asking "what's installed" needs the real resolved semver (matching what doctor's own
     // engine-version-skew check already shows), not the declared dependency range.
     expect(status.engine.version).toBe(readInstalledEnginePackageVersion());
-    expect(status.engine.version).not.toBe("^3.0.0");
+    expect(status.engine.version).not.toBe(DECLARED_ENGINE_DEPENDENCY_RANGE);
   });
 
   it("buildEngineVersionDisplay prefers a real resolved version when available", () => {
@@ -74,7 +82,7 @@ describe("loopover-miner status/doctor (#2288)", () => {
   });
 
   it("REGRESSION: buildEngineVersionDisplay falls back to the declared dependency range when real resolution comes up empty", () => {
-    expect(buildEngineVersionDisplay(() => null)).toBe("^3.0.0");
+    expect(buildEngineVersionDisplay(() => null)).toBe(DECLARED_ENGINE_DEPENDENCY_RANGE);
   });
 
   it("collectStatus prefers LOOPOVER_MINER_VERSION over package.json (#4310)", () => {
