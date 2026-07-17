@@ -342,11 +342,50 @@ function parsePoetryLock(path: string, patch: string, maxLines: number): Lockfil
   return [...byKey.values()].filter((change) => change.to && change.to !== change.from);
 }
 
+// pnpm encodes the resolved version directly in each `packages:`/`snapshots:` map KEY (`name@version`, with an
+// optional leading `/` on v6 and an optional `(peerA@x)` peer-scope suffix on snapshot keys) rather than on a
+// separate `version:` line the way yarn/npm do. So a bump is just a `-name@old:` / `+name@new:` key-line pair,
+// and dedup-by-package folds the same change appearing in both `packages:` and `snapshots:`. A peer-only churn
+// (`foo@1(react@17)` -> `foo@1(react@18)`) strips to `foo@1` on both sides and is dropped by the to!==from
+// filter. The legacy pnpm v5 `/name/version` key form (slash-separated, no `@`) is intentionally NOT parsed —
+// the issue scopes this to "at minimum the current version", and v5 is out of active use.
+function parsePnpmLock(path: string, patch: string, maxLines: number): LockfileChange[] {
+  const byKey = new Map<string, LockfileChange>();
+  const KEY = /^\s+['"]?\/?(@?[^@'"\s()/]+(?:\/[^@'"\s()]+)?)@([^'"\s():]+)(?:\([^)]*\))?['"]?:\s*$/;
+  for (const line of patchLines(patch, maxLines)) {
+    if (line.sign === " ") continue;
+    const match = KEY.exec(line.content);
+    if (!match) continue;
+    const pkg = match[1]!;
+    const version = match[2]!;
+    const key = `npm::${pkg}`;
+    const entry =
+      byKey.get(key) ??
+      {
+        file: path,
+        line: line.newLine,
+        ecosystem: "npm" as const,
+        package: pkg,
+        from: null,
+        to: "",
+      };
+    if (line.sign === "+") {
+      entry.to = version;
+      entry.line = line.newLine;
+    } else if (line.sign === "-") {
+      entry.from = version;
+    }
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()].filter((change) => change.to && change.to !== change.from);
+}
+
 function parseLockfile(path: string, patch: string, maxLines: number): LockfileChange[] {
   const name = lockfileBasename(path).toLowerCase();
   if (name === "package-lock.json") return parsePackageLock(path, patch, maxLines);
   if (name === "yarn.lock") return parseYarnLock(path, patch, maxLines);
   if (name === "poetry.lock") return parsePoetryLock(path, patch, maxLines);
+  if (name === "pnpm-lock.yaml") return parsePnpmLock(path, patch, maxLines);
   return [];
 }
 

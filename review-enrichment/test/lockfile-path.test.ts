@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { isSupportedLockfile, lockfileBasename } from "../dist/lockfile-path.js";
+import { isParseableLockfile, isSupportedLockfile, lockfileBasename } from "../dist/lockfile-path.js";
 
 test("isSupportedLockfile classifies the recognized ecosystem lockfiles", () => {
   // Established set (npm / yarn / pnpm / poetry / go).
@@ -39,4 +39,16 @@ test("lockfileBasename returns the final path segment across separators", () => 
   assert.equal(lockfileBasename("a/b/Cargo.lock"), "Cargo.lock");
   assert.equal(lockfileBasename("a\\b\\bun.lockb"), "bun.lockb");
   assert.equal(lockfileBasename("composer.lock"), "composer.lock");
+});
+
+test("isParseableLockfile now includes pnpm-lock.yaml, staying aligned with parseLockfile (#7010)", () => {
+  // pnpm gained a real parser in #7010, so it moves from classification-only into the parseable set. The
+  // invariant is that this set must match parseLockfile()'s dispatch exactly.
+  for (const p of ["pnpm-lock.yaml", "web/pnpm-lock.yaml", "PNPM-LOCK.YAML", "package-lock.json", "yarn.lock", "poetry.lock"]) {
+    assert.equal(isParseableLockfile(p), true, p);
+  }
+  // Classification-only lockfiles are still NOT parseable (no parseLockfile branch exists for them).
+  for (const p of ["go.sum", "Cargo.lock", "composer.lock", "bun.lockb", "package.json"]) {
+    assert.equal(isParseableLockfile(p), false, p);
+  }
 });

@@ -70,9 +70,12 @@ test("extractLockfileChanges does not let unparsed lockfiles consume the scan bu
     "+lodash@^4.17.21:",
     '+  version "4.17.21"',
   ].join("\n");
+  // Cargo.lock is classification-only (not in PARSEABLE_LOCKFILE_NAMES), so it is skipped BEFORE consuming a
+  // scan-budget slot. (This filler used pnpm-lock.yaml until #7010 made pnpm parseable; a currently-unparsed
+  // format is now required to still exercise the "unparsed lockfiles don't consume budget" path.)
   const filler = Array.from({ length: 12 }, (_, index) => ({
-    path: `pkg-${index}/pnpm-lock.yaml`,
-    patch: "@@ -1,0 +1,1 @@\n+lockfileVersion: 6.0",
+    path: `pkg-${index}/Cargo.lock`,
+    patch: '@@ -1,0 +1,2 @@\n+[[package]]\n+name = "serde"',
   }));
 
   const changes = extractLockfileChanges([
@@ -375,4 +378,111 @@ test("queryOsvBatch's per-item fallback stops issuing direct queries once the si
   assert.deepEqual(cvesByKey.get("npm::lodash@4.17.21"), []);
   assert.equal(cvesByKey.has("npm::axios@1.6.1"), true);
   assert.deepEqual(cvesByKey.get("npm::axios@1.6.1"), []);
+});
+
+test("extractLockfileChanges parses a pnpm-lock.yaml v9 version bump (unscoped + scoped) (#7010)", () => {
+  // pnpm encodes name@version in the map key itself, so a bump is a `-name@old:` / `+name@new:` key pair with
+  // no separate version line — unlike yarn/npm.
+  const changes = extractLockfileChanges([
+    {
+      path: "pnpm-lock.yaml",
+      patch: [
+        "@@ -2,4 +2,4 @@ packages:",
+        " packages:",
+        "-  lodash@4.17.20:",
+        "+  lodash@4.17.21:",
+        "-  '@babel/code-frame@7.24.6':",
+        "+  '@babel/code-frame@7.24.7':",
+      ].join("\n"),
+    },
+  ]);
+
+  assert.deepEqual(changes, [
+    { file: "pnpm-lock.yaml", line: 3, ecosystem: "npm", package: "lodash", from: "4.17.20", to: "4.17.21" },
+    { file: "pnpm-lock.yaml", line: 4, ecosystem: "npm", package: "@babel/code-frame", from: "7.24.6", to: "7.24.7" },
+  ]);
+});
+
+test("extractLockfileChanges reports a newly-added pnpm dependency with from:null (#7010)", () => {
+  const changes = extractLockfileChanges([
+    {
+      path: "pnpm-lock.yaml",
+      patch: ["@@ -5,0 +6,1 @@", "+  is-odd@3.0.1:"].join("\n"),
+    },
+  ]);
+
+  assert.deepEqual(changes, [
+    { file: "pnpm-lock.yaml", line: 6, ecosystem: "npm", package: "is-odd", from: null, to: "3.0.1" },
+  ]);
+});
+
+test("extractLockfileChanges strips pnpm peer-scope suffixes, so a peer-only churn is NOT a change (#7010)", () => {
+  // A snapshot key carries a `(peerA@x)` suffix; when only the peer version moves, the package's OWN version is
+  // unchanged and must not be reported. Stripping the suffix makes both sides resolve to `foo@1.2.3` -> dropped.
+  const changes = extractLockfileChanges([
+    {
+      path: "pnpm-lock.yaml",
+      patch: [
+        "@@ -10,2 +10,2 @@ snapshots:",
+        "-  foo@1.2.3(react@17.0.2):",
+        "+  foo@1.2.3(react@18.2.0):",
+      ].join("\n"),
+    },
+  ]);
+
+  assert.deepEqual(changes, []);
+});
+
+test("extractLockfileChanges parses a peer-scoped pnpm key when the package's OWN version bumps (#7010)", () => {
+  const changes = extractLockfileChanges([
+    {
+      path: "pnpm-lock.yaml",
+      patch: [
+        "@@ -10,2 +10,2 @@ snapshots:",
+        "-  foo@1.2.3(react@18.2.0):",
+        "+  foo@1.3.0(react@18.2.0):",
+      ].join("\n"),
+    },
+  ]);
+
+  assert.deepEqual(changes, [
+    { file: "pnpm-lock.yaml", line: 10, ecosystem: "npm", package: "foo", from: "1.2.3", to: "1.3.0" },
+  ]);
+});
+
+test("extractLockfileChanges parses the pnpm v6 leading-slash key form (#7010)", () => {
+  const changes = extractLockfileChanges([
+    {
+      path: "pnpm-lock.yaml",
+      patch: [
+        "@@ -2,2 +2,2 @@ packages:",
+        "-  /lodash@4.17.20:",
+        "+  /lodash@4.17.21:",
+      ].join("\n"),
+    },
+  ]);
+
+  assert.deepEqual(changes, [
+    { file: "pnpm-lock.yaml", line: 2, ecosystem: "npm", package: "lodash", from: "4.17.20", to: "4.17.21" },
+  ]);
+});
+
+test("extractLockfileChanges ignores pnpm importer specifier/version lines (only packages/snapshots keys count) (#7010)", () => {
+  // The importers section has `lodash:` / `specifier:` / `version:` lines — none of which is a `name@version`
+  // key — so the parser must extract nothing from them (the real resolved change lives in packages:).
+  const changes = extractLockfileChanges([
+    {
+      path: "pnpm-lock.yaml",
+      patch: [
+        "@@ -1,5 +1,5 @@ importers:",
+        "     lodash:",
+        "-      specifier: ^4.17.20",
+        "+      specifier: ^4.17.21",
+        "-      version: 4.17.20",
+        "+      version: 4.17.21",
+      ].join("\n"),
+    },
+  ]);
+
+  assert.deepEqual(changes, []);
 });

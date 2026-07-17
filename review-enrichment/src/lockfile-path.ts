@@ -13,7 +13,7 @@ const LOCKFILE_NAMES = new Set([
 ]);
 
 /** Lockfiles the drift analyzer can actually parse today — narrower than categorization. */
-const PARSEABLE_LOCKFILE_NAMES = new Set(["package-lock.json", "yarn.lock", "poetry.lock"]);
+const PARSEABLE_LOCKFILE_NAMES = new Set(["package-lock.json", "yarn.lock", "poetry.lock", "pnpm-lock.yaml"]);
 
 /** Lockfile basenames are case-insensitive on common filesystems — normalize separators first. */
 export function lockfileBasename(path: string): string {
