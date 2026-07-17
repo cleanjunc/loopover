@@ -63,7 +63,10 @@ export function checkLaptopStateSqlite(env = process.env) {
     };
   }
   try {
-    const db = new DatabaseSync(dbPath, { readonly: true });
+    // `readOnly` (camelCase) -- node:sqlite silently IGNORES `readonly` (lowercase) as an unrecognized option
+    // and opens read-write anyway, which would break doctor's own "no writes, no network" contract. Same
+    // footgun already documented in claim-ledger.js's openClaimLedgerReadOnly and purge-cli.js.
+    const db = new DatabaseSync(dbPath, { readOnly: true });
     db.prepare("SELECT 1").get();
     db.close();
     return { name: "laptop-state-sqlite", ok: true, detail: dbPath };

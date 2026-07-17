@@ -9,7 +9,26 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+/** Records every `new DatabaseSync(path, options)` the module under test performs, so a test can assert the
+ *  OPTIONS it opens with (#6765) -- checkLaptopStateSqlite never exposes its own handle. The subclass just
+ *  records and delegates, so every other test's behavior is unchanged. */
+const { databaseSyncOptions } = vi.hoisted(() => ({ databaseSyncOptions: [] as Array<Record<string, unknown> | undefined> }));
+
+vi.mock("node:sqlite", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:sqlite")>();
+  class RecordingDatabaseSync extends actual.DatabaseSync {
+    // Rest-args forwarding: passing an explicit `undefined` options arg is NOT the same as omitting it, so
+    // every existing `new DatabaseSync(path)` caller must reach super with its original arity.
+    constructor(...args: ConstructorParameters<typeof actual.DatabaseSync>) {
+      databaseSyncOptions.push(args[1] as Record<string, unknown> | undefined);
+      super(...args);
+    }
+  }
+  return { ...actual, DatabaseSync: RecordingDatabaseSync };
+});
 import {
   checkDockerPresent,
   checkLaptopStateSqlite,
@@ -79,6 +98,31 @@ describe("loopover-miner laptop init (#2329)", () => {
     const check = checkLaptopStateSqlite(env);
     expect(check.ok).toBe(false);
     expect(check.detail).toContain("loopover-miner init");
+  });
+
+  it("REGRESSION: doctor's laptop-state check opens a driver-enforced read-only connection (#6765)", () => {
+    const root = tempRoot();
+    const env = { LOOPOVER_MINER_CONFIG_DIR: join(root, "state") };
+    initLaptopState(env);
+    const dbPath = resolveLaptopStateDbPath(env);
+    databaseSyncOptions.length = 0;
+
+    expect(checkLaptopStateSqlite(env).ok).toBe(true);
+    // The check must open with camelCase `readOnly`. node:sqlite silently IGNORES the lowercase `readonly`
+    // key as an unrecognized option and opens read-write anyway -- which is what this used to pass, breaking
+    // doctor's own documented "no writes, no network" contract.
+    expect(databaseSyncOptions).toEqual([{ readOnly: true }]);
+
+    // ...and that option is what makes the connection driver-enforced: a write through it throws, whereas the
+    // silently-ignored lowercase spelling happily writes.
+    const enforced = new DatabaseSync(dbPath, { readOnly: true });
+    expect(() => enforced.exec("CREATE TABLE probe_camel (id INTEGER)")).toThrow();
+    enforced.close();
+
+    const ignored = new DatabaseSync(dbPath, { readonly: true } as never);
+    expect(() => ignored.exec("CREATE TABLE probe_lower (id INTEGER)")).not.toThrow();
+    ignored.exec("DROP TABLE probe_lower");
+    ignored.close();
   });
 
   it("doctor sqlite check reports unreadable files", () => {
