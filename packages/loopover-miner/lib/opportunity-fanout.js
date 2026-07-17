@@ -301,6 +301,17 @@ function labelNames(labels) {
     .filter((name) => name.length > 0);
 }
 
+// Assignee logins (#7040): GitHub's issue-list/search payloads already carry `assignees` in the same response
+// that supplies labels/comments/etc. -- no extra request needed. contribution-profile-filter.js's
+// assignee-exclusion rule uses this to drop candidates assigned to a login the target repo considers off-limits
+// (its own owner, by default).
+function assigneeLogins(assignees) {
+  if (!Array.isArray(assignees)) return [];
+  return assignees
+    .map((assignee) => (assignee && typeof assignee === "object" && typeof assignee.login === "string" ? assignee.login : ""))
+    .filter((login) => login.length > 0);
+}
+
 function normalizeIssue(target, issue, policySource) {
   if (!issue || typeof issue !== "object" || issue.pull_request) return null;
   if (!Number.isInteger(issue.number) || issue.number <= 0) return null;
@@ -312,6 +323,7 @@ function normalizeIssue(target, issue, policySource) {
     issueNumber: issue.number,
     title: issue.title,
     labels: labelNames(issue.labels),
+    assignees: assigneeLogins(issue.assignees),
     commentsCount: Number.isFinite(issue.comments) ? issue.comments : 0,
     createdAt: typeof issue.created_at === "string" ? issue.created_at : null,
     updatedAt: typeof issue.updated_at === "string" ? issue.updated_at : null,

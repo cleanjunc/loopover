@@ -9,12 +9,15 @@ import {
 type Candidate = {
   repoFullName: string;
   issueNumber: number;
+  owner?: string;
   labels?: string[];
+  assignees?: string[];
 };
 
 const candidate = (issueNumber: number, labels: string[]): Candidate => ({
   repoFullName: "acme/widgets",
   issueNumber,
+  owner: "acme",
   labels,
 });
 
@@ -198,5 +201,64 @@ describe("filterCandidatesByProfiles (#6798)", () => {
       null as never,
     );
     expect(kept).toHaveLength(1);
+  });
+
+  describe("assignee-exclusion (#7040)", () => {
+    it("excludes a candidate assigned to the repo's own owner login", () => {
+      const assigned: Candidate = { ...candidate(1, ["good first issue"]), assignees: ["acme"] };
+      const { kept, excluded } = filterCandidatesByProfiles([assigned], profilesFor(trustworthyProfile()));
+      expect(kept).toEqual([]);
+      expect(excluded).toEqual([{ candidate: assigned, reason: ELIGIBILITY_EXCLUSION_REASONS.EXCLUDED_ASSIGNEE }]);
+    });
+
+    it("matches the owner login case-insensitively", () => {
+      const assigned: Candidate = { ...candidate(1, ["good first issue"]), assignees: ["ACME"] };
+      const { excluded } = filterCandidatesByProfiles([assigned], profilesFor(trustworthyProfile()));
+      expect(excluded[0]?.reason).toBe(ELIGIBILITY_EXCLUSION_REASONS.EXCLUDED_ASSIGNEE);
+    });
+
+    it("does not exclude a candidate assigned to someone other than the repo owner", () => {
+      const assigned: Candidate = { ...candidate(1, ["good first issue"]), assignees: ["someone-else"] };
+      const { kept, excluded } = filterCandidatesByProfiles([assigned], profilesFor(trustworthyProfile()));
+      expect(kept).toHaveLength(1);
+      expect(excluded).toEqual([]);
+    });
+
+    it("applies unconditionally: excludes an owner-assigned candidate even when the repo has NO profile at all", () => {
+      const assigned: Candidate = { ...candidate(1, ["bug"]), repoFullName: "other/repo", assignees: ["other"] };
+      const withOwner: Candidate = { ...assigned, owner: "other" };
+      const { kept, excluded } = filterCandidatesByProfiles([withOwner], profilesFor(trustworthyProfile()));
+      expect(kept).toEqual([]);
+      expect(excluded).toEqual([{ candidate: withOwner, reason: ELIGIBILITY_EXCLUSION_REASONS.EXCLUDED_ASSIGNEE }]);
+    });
+
+    it("applies unconditionally: excludes an owner-assigned candidate even when the profile's eligibility confidence is not explicit", () => {
+      const lowConfidence = trustworthyProfile({
+        eligibilityLabels: { value: null, confidence: "absent", provenance: [] },
+      });
+      const assigned: Candidate = { ...candidate(1, ["bug"]), assignees: ["acme"] };
+      const { kept, excluded } = filterCandidatesByProfiles([assigned], profilesFor(lowConfidence));
+      expect(kept).toEqual([]);
+      expect(excluded).toEqual([{ candidate: assigned, reason: ELIGIBILITY_EXCLUSION_REASONS.EXCLUDED_ASSIGNEE }]);
+    });
+
+    it("tolerates a candidate with no owner or assignees fields (never excluded, never throws)", () => {
+      const { kept, excluded } = filterCandidatesByProfiles(
+        [{ repoFullName: "acme/widgets", issueNumber: 6, labels: ["good first issue"] }],
+        profilesFor(trustworthyProfile()),
+      );
+      expect(kept).toHaveLength(1);
+      expect(excluded).toEqual([]);
+    });
+
+    it("ignores a non-string assignee entry without matching or throwing", () => {
+      const assigned: Candidate = {
+        ...candidate(1, ["good first issue"]),
+        assignees: [42 as unknown as string],
+      };
+      const { kept, excluded } = filterCandidatesByProfiles([assigned], profilesFor(trustworthyProfile()));
+      expect(kept).toHaveLength(1);
+      expect(excluded).toEqual([]);
+    });
   });
 });

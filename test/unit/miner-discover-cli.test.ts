@@ -71,6 +71,7 @@ function fanOutIssue(overrides: Record<string, unknown> = {}) {
     issueNumber: 1,
     title: "Add queue retry helper",
     labels: ["help wanted"],
+    assignees: [],
     commentsCount: 1,
     createdAt: "2026-07-09T10:00:00.000Z",
     updatedAt: "2026-07-09T10:00:00.000Z",
@@ -1550,6 +1551,39 @@ describe("runDiscover onResult hook (#6522)", () => {
         extract: extract as never,
       });
       expect(extract).not.toHaveBeenCalled();
+    });
+
+    describe("assignee-exclusion (#7040)", () => {
+      it("excludes a candidate assigned to the repo's own owner, unconditionally enqueuing only the rest", async () => {
+        const issues = [
+          fanOutIssue({ issueNumber: 1, labels: ["help wanted"] }), // eligible, unassigned
+          fanOutIssue({ issueNumber: 2, labels: ["help wanted"], assignees: ["acme"] }), // owner-assigned
+        ];
+        const { portfolioQueue, opts } = discoverWith(issues, new Map([["acme/widgets", trustworthyProfile]]));
+        const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+        const exitCode = await runDiscover(["acme/widgets", "--json"], opts);
+        expect(exitCode).toBe(0);
+
+        const payload = JSON.parse(String(log.mock.calls[0]?.[0]));
+        expect(payload.ranked.map((e: { issueNumber: number }) => e.issueNumber)).toEqual([1]);
+        expect(payload.excluded).toEqual([
+          { repoFullName: "acme/widgets", issueNumber: 2, reason: "excluded_assignee" },
+        ]);
+        expect(portfolioQueue.listQueue("acme/widgets").map((e) => e.identifier)).toEqual(["issue:1"]);
+      });
+
+      it("applies even when the repo has no profile at all (not gated behind the label safe-default)", async () => {
+        const issues = [fanOutIssue({ issueNumber: 1, labels: ["bug"], assignees: ["acme"] })];
+        const { opts } = discoverWith(issues, null);
+        const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+        await runDiscover(["acme/widgets", "--json"], opts);
+
+        const payload = JSON.parse(String(log.mock.calls[0]?.[0]));
+        expect(payload.ranked).toEqual([]);
+        expect(payload.excluded).toEqual([
+          { repoFullName: "acme/widgets", issueNumber: 1, reason: "excluded_assignee" },
+        ]);
+      });
     });
   });
 });
