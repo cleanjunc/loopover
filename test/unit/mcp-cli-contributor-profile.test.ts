@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { closeFixtureServer, runAsync, runExpectingFailure, startFixtureServer } from "./support/mcp-cli-harness";
+import { closeFixtureServer, run, runAsync, runExpectingFailure, startFixtureServer } from "./support/mcp-cli-harness";
 
 describe("loopover-mcp CLI — contributor-profile (#6737)", () => {
   let tempDir: string | null = null;
@@ -48,5 +48,14 @@ describe("loopover-mcp CLI — contributor-profile (#6737)", () => {
     const failure = runExpectingFailure(["contributor-profile"], { ...e, LOOPOVER_LOGIN: "", GITHUB_LOGIN: "" });
     expect(`${failure.stdout}${failure.stderr}`).toMatch(/Pass --login/);
     expect(requests.filter((url) => url.includes("/profile"))).toHaveLength(0);
+  });
+
+  it("prints usage for --help without resolving a login or hitting the network (#6992)", () => {
+    // --help must short-circuit BEFORE login resolution, so this succeeds with no --login and no server --
+    // previously it fell through and threw the "Pass --login" error instead of printing usage.
+    const help = run(["contributor-profile", "--help"], { LOOPOVER_LOGIN: "", GITHUB_LOGIN: "" });
+    expect(help).toContain("Usage: loopover-mcp contributor-profile --login <github-login> [--json]");
+    expect(help).toContain("Mirrors the loopover_get_contributor_profile MCP tool");
+    expect(help).not.toMatch(/Pass --login/);
   });
 });

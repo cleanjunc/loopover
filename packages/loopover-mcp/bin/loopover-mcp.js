@@ -3865,12 +3865,27 @@ function printDecisionPackHelp() {
   );
 }
 
+function printContributorProfileHelp() {
+  process.stdout.write(
+    [
+      "Usage: loopover-mcp contributor-profile --login <github-login> [--json]",
+      "",
+      "Fetch the contributor profile for a GitHub login.",
+      "Mirrors the loopover_get_contributor_profile MCP tool and GET /v1/contributors/{login}/profile. No source upload.",
+      "",
+      "Login resolves from --login, the active session, LOOPOVER_LOGIN, then GITHUB_LOGIN.",
+      "Pass --json for machine-readable output.",
+    ].join("\n") + "\n",
+  );
+}
+
 // #6737: CLI mirror of the loopover_get_contributor_profile MCP tool and GET /v1/contributors/{login}/profile
 // (requireContributorAccess-gated -- the same gate decision-pack/repo-decision already satisfy). Login resolves
 // from --login / the active session / LOOPOVER_LOGIN / GITHUB_LOGIN, exactly like the sibling contributor
 // commands, so an already-logged-in contributor never retypes their own login. Named `contributor-profile`
 // because the top-level `profile` command already manages MCP client profiles.
 async function contributorProfileCli(options) {
+  if (options.help === true) return printContributorProfileHelp();
   const login = options.login ?? activeProfile.session?.login ?? process.env.LOOPOVER_LOGIN ?? process.env.GITHUB_LOGIN;
   if (!login) throw new Error("Pass --login <github-login>, log in with `loopover-mcp login`, or set LOOPOVER_LOGIN.");
   const payload = await apiGet(`/v1/contributors/${encodeURIComponent(login)}/profile`);
