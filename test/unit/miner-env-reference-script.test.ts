@@ -38,6 +38,32 @@ function fixtureRoot(): string {
   return root;
 }
 
+// #6994: the coding-agent driver lives in the shared engine package (packages/loopover-engine/src/miner),
+// outside the miner package's own source roots, and reads its model env vars via a computed env[modelEnvKey]
+// access -- only detectable through the literal env-var-name argument at the createCliProvider call site.
+function fixtureRootWithEngineMinerRoot(): string {
+  const root = fixtureRoot();
+  mkdirSync(join(root, "packages", "loopover-engine", "src", "miner"), { recursive: true });
+  // Build the env type without angle brackets in this .ts file's string literals (keeps transforms happy).
+  const envType = ["Record", "<", "string, string | undefined", ">"].join("");
+  writeFileSync(
+    join(root, "packages", "loopover-engine", "src", "miner", "driver-factory.ts"),
+    [
+      `export function isPaused(env: ${envType}) {`,
+      '  return env.MINER_CODING_AGENT_PAUSED ?? "";',
+      "}",
+      `function createCliProvider(command: string, modelEnvKey: string, options: unknown, env: ${envType}) {`,
+      "  return env[modelEnvKey];",
+      "}",
+      `export function build(env: ${envType}) {`,
+      '  return createCliProvider("claude", "MINER_CODING_AGENT_CLAUDE_MODEL", {}, env);',
+      "}",
+      "",
+    ].join("\n"),
+  );
+  return root;
+}
+
 describe("generate-env-reference (#5179)", () => {
   it("filters to LOOPOVER_MINER_* and MINER_* vars only", () => {
     expect(isMinerEnvVar("LOOPOVER_MINER_CONFIG_DIR")).toBe(true);
@@ -63,6 +89,16 @@ describe("generate-env-reference (#5179)", () => {
         defaultValue: "",
       },
     ]);
+  });
+
+  it("REGRESSION (#6994): scans packages/loopover-engine/src/miner and detects createCliProvider's literal model-env-key argument", () => {
+    const names = collectMinerEnvVars({ rootDir: fixtureRootWithEngineMinerRoot() }).map((row) => row.name);
+    expect(names).toContain("MINER_CODING_AGENT_PAUSED"); // a plain env.X read in the new source root
+    // The literal name only ever appears at the createCliProvider CALL site -- env[modelEnvKey] inside the
+    // function itself is a computed access with no literal name to find, so this would be silently missed
+    // without ENV_NAME_LITERAL_ARG_HELPERS recognizing createCliProvider the same way it already recognizes
+    // resolveLocalStoreDbPath.
+    expect(names).toContain("MINER_CODING_AGENT_CLAUDE_MODEL");
   });
 
   it("renders a deterministic markdown table with names, references, and defaults", () => {
