@@ -1,5 +1,53 @@
 # Changelog
 
+## [3.4.0](https://github.com/JSONbored/loopover/compare/engine-v3.3.0...engine-v3.4.0) (2026-07-18)
+
+
+### Features
+
+* **api:** add a REST route + CLI mirror for loopover_check_test_evidence ([#6810](https://github.com/JSONbored/loopover/issues/6810)) ([d45d8fd](https://github.com/JSONbored/loopover/commit/d45d8fd6eb12c1f85b66912097d1a562e900ad13)), closes [#6749](https://github.com/JSONbored/loopover/issues/6749)
+* **config:** make sweepWatchdog staleness threshold configurable ([#6594](https://github.com/JSONbored/loopover/issues/6594)) ([#6639](https://github.com/JSONbored/loopover/issues/6639)) ([0e313c8](https://github.com/JSONbored/loopover/commit/0e313c8735bc02036a769845c8d0e70427329582))
+* **engine:** add selfLoopAutonomy to AmsPolicySpec ([bd614bf](https://github.com/JSONbored/loopover/commit/bd614bf2fccabceb7b0bc84ec0095c3a73742894))
+* **engine:** add selfLoopAutonomy to AmsPolicySpec ([880b973](https://github.com/JSONbored/loopover/commit/880b97362d793afc2fc6d5e0803204019869b457)), closes [#6559](https://github.com/JSONbored/loopover/issues/6559)
+* **mcp:** CLI mirror for loopover_draft_pr_body ([#6974](https://github.com/JSONbored/loopover/issues/6974)) ([13bd48b](https://github.com/JSONbored/loopover/commit/13bd48bb9342f993916b8deb79cf287994b41aaf))
+* **mcp:** CLI mirror for loopover_explain_gate_disposition ([#6966](https://github.com/JSONbored/loopover/issues/6966)) ([4966070](https://github.com/JSONbored/loopover/commit/4966070447dd45fcd4d5a2549a7e0713ad10c678))
+* **miner:** add read-only chat grounding over the existing miner MCP tools ([#6570](https://github.com/JSONbored/loopover/issues/6570)) ([ed16fef](https://github.com/JSONbored/loopover/commit/ed16fef8508753b232bca4ec76fa504f33da3600)), closes [#6517](https://github.com/JSONbored/loopover/issues/6517)
+* **miner:** consult selfLoopAutonomy in decideNextAction's pass-to-handoff step ([#6581](https://github.com/JSONbored/loopover/issues/6581)) ([7a275c7](https://github.com/JSONbored/loopover/commit/7a275c7558c712a49a334397cef98a0509778c6f)), closes [#6560](https://github.com/JSONbored/loopover/issues/6560)
+* **orb:** trust-gate inbound federated bundles per the [#6477](https://github.com/JSONbored/loopover/issues/6477) key-trust design ([#6649](https://github.com/JSONbored/loopover/issues/6649)) ([729254a](https://github.com/JSONbored/loopover/commit/729254ad01459f2e51bd4a4936cbc5b2fb0b398b))
+* **review:** bridge a submitter's AMS track record into ORB reputation, upgrade-only ([#6566](https://github.com/JSONbored/loopover/issues/6566)) ([97a1938](https://github.com/JSONbored/loopover/commit/97a19380a0f52a92991625805c76318da5b57418)), closes [#6485](https://github.com/JSONbored/loopover/issues/6485)
+* **selfhost:** make LOOPOVER_SWEEP_WATCHDOG and LOOPOVER_PR_RECONCILIATION .loopover.yml-controllable ([3ac9501](https://github.com/JSONbored/loopover/commit/3ac9501e1cc48f913f236b6bbe9335e794f0b848))
+* **selfhost:** make LOOPOVER_SWEEP_WATCHDOG and LOOPOVER_PR_RECONCILIATION .loopover.yml-controllable ([7ca394a](https://github.com/JSONbored/loopover/commit/7ca394a1eb650518e8ef324aa35caacd8070bfbb)), closes [#6558](https://github.com/JSONbored/loopover/issues/6558)
+
+
+### Fixes
+
+* **advisory:** redact the check-run leak terms sanitizePublicComment already caught ([39a431b](https://github.com/JSONbored/loopover/commit/39a431bdda222283c46808fbb1d964aaa3deaf42))
+* **advisory:** redact the check-run leak terms sanitizePublicComment already caught ([3b956f4](https://github.com/JSONbored/loopover/commit/3b956f4675bbdd265ad7dacc65c6ed17b7a01679)), closes [#7074](https://github.com/JSONbored/loopover/issues/7074)
+* **config:** recognize federatedIntelligence manifest block in lint and preview ([95ba59a](https://github.com/JSONbored/loopover/commit/95ba59aa2731dc3802ca90ea9326c9ca8f7e2916))
+* **config:** recognize federatedIntelligence manifest block in lint and preview ([1c80fb8](https://github.com/JSONbored/loopover/commit/1c80fb84b88c2ce4028e8435056025bfca4da914))
+* correct four stale 'improvementSignal not wired yet' comments ([#6691](https://github.com/JSONbored/loopover/issues/6691)) ([2d493cd](https://github.com/JSONbored/loopover/commit/2d493cd833059981e69d9008e771f970c5cc6f21))
+* **discovery-index:** cap the untrusted response candidate list ([#6774](https://github.com/JSONbored/loopover/issues/6774)) ([ff46459](https://github.com/JSONbored/loopover/commit/ff464596ec7c2f07ffe597ca79c5cf2685090e1f))
+* **discovery-index:** cap the untrusted response candidate list ([#6774](https://github.com/JSONbored/loopover/issues/6774)) ([ca5c81a](https://github.com/JSONbored/loopover/commit/ca5c81afb97a1a8ac5e183ef0239799c50ed9b51))
+* **engine:** align predicted-gate collision risk with live-gate twin ([#6671](https://github.com/JSONbored/loopover/issues/6671)) ([2df475c](https://github.com/JSONbored/loopover/commit/2df475c942048e687be3c4065cb60a66c129b965)), closes [#6629](https://github.com/JSONbored/loopover/issues/6629)
+* **engine:** cap predicted-gate's local linked-issue extractor at the canonical 50 ([#6771](https://github.com/JSONbored/loopover/issues/6771)) ([fcf41bc](https://github.com/JSONbored/loopover/commit/fcf41bc27eb05fc9382216086f2cc97ed6b1342c))
+* **engine:** cap predicted-gate's local linked-issue extractor at the canonical 50 ([#6771](https://github.com/JSONbored/loopover/issues/6771)) ([0fe3e99](https://github.com/JSONbored/loopover/commit/0fe3e99f213fa84e0fe8f9d28614f414b62ab022))
+* **engine:** exclude inline code spans in predicted-gate extractLinkedIssueNumbers ([e6ef456](https://github.com/JSONbored/loopover/commit/e6ef4569ba6f970e0105bed678bfdf096dd5c1e8))
+* **engine:** exclude inline code spans in predicted-gate extractLinkedIssueNumbers ([#6630](https://github.com/JSONbored/loopover/issues/6630)) ([6ac8c1f](https://github.com/JSONbored/loopover/commit/6ac8c1fed33a58ccea3846551bc74c6cdadbe275))
+* **engine:** filter maintainer-authored manifest fields out of public findings ([99aeead](https://github.com/JSONbored/loopover/commit/99aeeadb23f5d5360d8d5f9bcd16d7bd0a967209))
+* **engine:** filter maintainer-authored manifest fields out of public findings ([5f5a6fc](https://github.com/JSONbored/loopover/commit/5f5a6fca9b4fa844476d3cbf0ce15f683e1865d5)), closes [#6770](https://github.com/JSONbored/loopover/issues/6770)
+* **engine:** floor percentComplete at 0 so it stays in its documented 0-100 range ([#6773](https://github.com/JSONbored/loopover/issues/6773)) ([ab9cb63](https://github.com/JSONbored/loopover/commit/ab9cb638bcbb363583b942da634ce5ead1346632))
+* **engine:** floor percentComplete at 0 so it stays in its documented 0-100 range ([#6773](https://github.com/JSONbored/loopover/issues/6773)) ([84543ed](https://github.com/JSONbored/loopover/commit/84543ed574cf452a8dc27db895304986e0dda0bc))
+* **engine:** honor no-issue rationale in predicted preflight ([#6645](https://github.com/JSONbored/loopover/issues/6645)) ([8b20ad6](https://github.com/JSONbored/loopover/commit/8b20ad63a80cce0f1bac6cf4a1e1226a830dbed8)), closes [#6628](https://github.com/JSONbored/loopover/issues/6628)
+* **engine:** treat non-finite calibration inputs as cold-start / safe clamp ([#6651](https://github.com/JSONbored/loopover/issues/6651)) ([d4b5a81](https://github.com/JSONbored/loopover/commit/d4b5a814a326a5a80c4d4cb64aea6f312c635a18)), closes [#6627](https://github.com/JSONbored/loopover/issues/6627)
+* **miner:** forward HOME and the real coding-agent credential to CLI subprocesses ([4a852de](https://github.com/JSONbored/loopover/commit/4a852de548963d6e8c5b858af8c36880d3132ab6))
+* **miner:** forward HOME and the real coding-agent credential to CLI subprocesses ([e327370](https://github.com/JSONbored/loopover/commit/e327370d963ae2d2a34988bdf5b10d2cee6a79e4)), closes [#6875](https://github.com/JSONbored/loopover/issues/6875)
+* **miner:** grant the claude-cli driver Read/Bash access, not just edits ([615dd46](https://github.com/JSONbored/loopover/commit/615dd4669c3b22774fe5a393be810946e722f2d4))
+* **miner:** grant the claude-cli driver Read/Bash access, not just edits ([664aebe](https://github.com/JSONbored/loopover/commit/664aebe79f0570f904bc93964f40b2c3e18c4e51)), closes [#6840](https://github.com/JSONbored/loopover/issues/6840)
+* **signals:** make shouldPublishPrIntelligenceComment respect commentMode for oss_maintainer ([#6776](https://github.com/JSONbored/loopover/issues/6776)) ([#6853](https://github.com/JSONbored/loopover/issues/6853)) ([fa8f577](https://github.com/JSONbored/loopover/commit/fa8f577de65390863248380707a85b6d5b776b28))
+* **test:** update grafana dashboard assertions for the historical-continuity query rewrite ([8cd0b24](https://github.com/JSONbored/loopover/commit/8cd0b2489e1b4f1803a310951f53f25d94ff6ddb))
+* **track-record:** exempt the GitHub login line from the public-field blocklist scan ([#6772](https://github.com/JSONbored/loopover/issues/6772)) ([4328d08](https://github.com/JSONbored/loopover/commit/4328d080f6ba3d5b0a1287861554409ba8ea8d24))
+* **track-record:** exempt the GitHub login line from the public-field blocklist scan ([#6772](https://github.com/JSONbored/loopover/issues/6772)) ([7ed6328](https://github.com/JSONbored/loopover/commit/7ed6328482b76325f8674b05c537829cc06f3bef))
+
 ## [3.3.0](https://github.com/JSONbored/loopover/compare/engine-v3.2.3...engine-v3.3.0) (2026-07-18)
 
 
