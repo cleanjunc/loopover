@@ -303,10 +303,29 @@
       {
         // API/broker maintenance lane. Review execution jobs are ignored unless the self-host Redis-backed
         // runtime binding exists; the deployed Cloudflare worker does not bind it.
+        //
+        // #4892: these four values are Cloudflare Queues CONSUMER-BINDING attributes -- read by Cloudflare's
+        // control plane at `wrangler deploy` time, before any Worker code runs, so unlike a docker-compose
+        // port mapping or a wrangler.jsonc `vars` entry they CANNOT be made runtime-env-configurable; the
+        // Worker has no way to read or override them via `env.SOMETHING`. Re-tuning them means editing these
+        // literals directly (a normal PR), or, once a second deploy target exists, adding that target's own
+        // named-environment `queues.consumers` override block -- there is only one deploy target today.
+        //
+        // The governing constraint, sized against a single installation's GitHub REST rate limit (5000 req/hr
+        // for a GitHub App installation token, shared across every job this lane processes for that install):
+        //   max_batch_size × max_concurrency = the most jobs that can be in flight, each making GitHub calls,
+        //   at any one instant -- keep that product comfortably under the install's remaining rate-limit
+        //   headroom (github-client.ts already backs off on 403/secondary-rate-limit responses; this bound
+        //   exists to make hitting that backoff path the rare case, not the norm).
         //  - max_batch_size 5 (was 10): one batch can't bundle as many heavy sweep/backfill jobs at once.
-        //  - max_concurrency 3: bounded fan-out — enough to drain metagraphed's worst sweep within the 2-min
-        //    cron interval, but not so wide it floods the shared GitHub installation rate bucket. (A follow-up
-        //    may tighten this to 2 once the sweep fans into tiny per-PR jobs.)
+        //  - max_concurrency 3: bounded fan-out -- first sized to drain one heavy installation's worst sweep
+        //    within the 2-min cron interval without flooding its own rate bucket (#1283); the SAME bound
+        //    coincidentally also caps fan-out PER installation under today's single-tenant deployment, since
+        //    every job in this lane shares one GitHub App's rate-limit pool regardless of which repo/install
+        //    it's for. A genuinely multi-tenant volume model needs real production job-volume data (job
+        //    rate, distinct-installation count, GitHub rate-limit headroom actually observed) to re-derive
+        //    against -- not available from this worktree; re-tune from a live dashboard/audit_events query,
+        //    not by guessing a bigger number.
         //  - retry_delay 30: a failed job backs off 30s instead of re-delivering immediately and re-hammering
         //    the already-overloaded path.
         "queue": "loopover-jobs",
