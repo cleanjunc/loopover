@@ -1,5 +1,15 @@
+// Deliberately not `typeof fetch`: the global fetch type (in a Cloudflare Workers-typed environment) is
+// overloaded to accept URL/RequestInfo/CfProperties, which a plain vi.fn() mock typed against a simple
+// (url: string, init?) shape can't satisfy under strict function-type checking. load-test-worker.mjs only
+// ever calls fetchImpl with a string URL and a plain {signal, headers} init, so this narrower shape is both
+// what's actually used and what test mocks can trivially implement.
+export type LoadTestFetch = (
+  url: string,
+  init?: { signal?: AbortSignal; headers?: Record<string, string> },
+) => Promise<Response>;
+
 export type RequestOnceOptions = {
-  fetchImpl?: typeof fetch;
+  fetchImpl?: LoadTestFetch;
   timeoutMs?: number;
 };
 
@@ -15,7 +25,7 @@ export type LoadTestOptions = {
   path?: string;
   levels?: number[];
   requestCount?: number;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: LoadTestFetch;
   timeoutMs?: number;
 };
 

@@ -49,7 +49,7 @@ describe("worker load-test script (#4913)", () => {
   it("requestOnce aborts and reports failure once the timeout elapses", async () => {
     const fetchImpl = vi.fn(
       (_url: string, init?: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
+        new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
         }),
     );
