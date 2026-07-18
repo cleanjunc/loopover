@@ -234,6 +234,10 @@ describe("PortfolioPage (#4306)", () => {
 });
 
 describe("fetchPortfolioQueue (#4306)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   const jsonResponse = (status: number, payload: unknown) =>
     ({ ok: status >= 200 && status < 300, status, json: async () => payload }) as unknown as Response;
 
@@ -275,6 +279,17 @@ describe("fetchPortfolioQueue (#4306)", () => {
         throw new Error("connection refused");
       }),
     ).toEqual({ ok: false, error: "connection refused" });
+  });
+
+  it("#5963: in demo mode, returns a canned summary without ever calling fetch", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "1");
+    let called = false;
+    const result = await fetchPortfolioQueue(async () => {
+      called = true;
+      return jsonResponse(200, { summary: fixtureSummary });
+    });
+    expect(called).toBe(false);
+    expect(result.ok).toBe(true);
   });
 });
 

@@ -3,6 +3,7 @@ import * as React from "react";
 import { GrafanaFooterLink } from "@/components/grafana-footer-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ChatRail } from "@/components/chat-rail";
+import { isDemoMode } from "@/lib/demo-data";
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -44,7 +45,14 @@ export function RootShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 border-b-hairline bg-background/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-6">
           <div className="min-w-0 flex-1">
-            <p className="text-token-xs uppercase tracking-[0.2em] text-primary font-mono">LoopOver Miner</p>
+            <div className="flex items-center gap-2">
+              <p className="text-token-xs uppercase tracking-[0.2em] text-primary font-mono">LoopOver Miner</p>
+              {isDemoMode() ? (
+                <span className="rounded-token-sm border border-mint/40 bg-mint/10 px-1.5 py-0.5 text-token-2xs font-mono uppercase tracking-wider text-mint">
+                  Demo — sample data, no live backend
+                </span>
+              ) : null}
+            </div>
             <h1 className="text-token-lg font-display font-semibold">Local dashboard</h1>
           </div>
           <nav

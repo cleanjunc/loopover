@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   fetchGovernorPauseState,
@@ -11,6 +11,7 @@ import {
   type GovernorPauseState,
   type GovernorPauseStateResult,
 } from "./lib/governor";
+import { resetDemoDataForTest } from "./lib/demo-data";
 import { GovernorControlSection } from "./routes/ledgers";
 import {
   governorApiPlugin,
@@ -99,6 +100,11 @@ describe("GovernorControlSection (#4857)", () => {
 });
 
 describe("fetchGovernorPauseState / pauseGovernor / resumeGovernor (#4857)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetDemoDataForTest();
+  });
+
   const jsonResponse = (status: number, payload: unknown) =>
     ({ ok: status >= 200 && status < 300, status, json: async () => payload }) as unknown as Response;
 
@@ -174,6 +180,40 @@ describe("fetchGovernorPauseState / pauseGovernor / resumeGovernor (#4857)", () 
         throw new Error("connection refused");
       }),
     ).toEqual(failing);
+  });
+
+  describe("demo mode (#5963)", () => {
+    it("fetchGovernorPauseState returns the canned (not-paused) demo state without ever calling fetch", async () => {
+      vi.stubEnv("VITE_DEMO_MODE", "1");
+      let called = false;
+      const result = await fetchGovernorPauseState(async () => {
+        called = true;
+        return jsonResponse(200, { pauseState: pausedState });
+      });
+      expect(called).toBe(false);
+      expect(result).toEqual({ ok: true, pauseState: { paused: false, reason: null, pausedAt: null } });
+    });
+
+    it("pauseGovernor/resumeGovernor mutate an in-memory demo state and round-trip through fetchGovernorPauseState, without ever calling fetch", async () => {
+      vi.stubEnv("VITE_DEMO_MODE", "1");
+      let called = false;
+      const failIfCalled = async () => {
+        called = true;
+        return jsonResponse(200, {});
+      };
+
+      const paused = await pauseGovernor("demo pause", failIfCalled);
+      expect(paused.ok).toBe(true);
+      expect(paused.ok && paused.pauseState.paused).toBe(true);
+      expect(paused.ok && paused.pauseState.reason).toBe("demo pause");
+      const afterPause = await fetchGovernorPauseState(failIfCalled);
+      expect(afterPause.ok && afterPause.pauseState.paused).toBe(true);
+
+      const resumed = await resumeGovernor(failIfCalled);
+      expect(resumed).toEqual({ ok: true, pauseState: { paused: false, reason: null, pausedAt: null } });
+
+      expect(called).toBe(false);
+    });
   });
 });
 

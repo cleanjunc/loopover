@@ -2,6 +2,8 @@
 // the miner-ui"). Mirrors the CLI's `loopover-miner queue release` / `queue requeue` commands via the
 // authenticated dev-server bridge in vite-portfolio-queue-actions-api.ts.
 
+import { getDemoPortfolioQueueItems, isDemoMode, removeDemoPortfolioQueueItem } from "./demo-data";
+
 export const PORTFOLIO_QUEUE_ITEMS_API_PATH = "/api/portfolio-queue/items";
 export const PORTFOLIO_QUEUE_RELEASE_API_PATH = "/api/portfolio-queue/release";
 export const PORTFOLIO_QUEUE_REQUEUE_API_PATH = "/api/portfolio-queue/requeue";
@@ -70,6 +72,7 @@ function parseActionResponse(response: Response, label: string): Promise<Portfol
 
 /** Fetch actionable queue rows (in_progress + done) for release/requeue controls. */
 export async function fetchPortfolioQueueItems(fetchImpl: typeof fetch = fetch): Promise<PortfolioQueueItemsResult> {
+  if (isDemoMode()) return { ok: true, items: getDemoPortfolioQueueItems() };
   try {
     const response = await fetchImpl(PORTFOLIO_QUEUE_ITEMS_API_PATH);
     return await parseItemsResponse(response, "local portfolio-queue items API");
@@ -102,6 +105,14 @@ async function postPortfolioQueueAction(
   item: Pick<PortfolioQueueActionItem, "repoFullName" | "identifier" | "apiBaseUrl">,
   fetchImpl: typeof fetch,
 ): Promise<PortfolioQueueActionResult> {
+  if (isDemoMode()) {
+    const removed = removeDemoPortfolioQueueItem(item.repoFullName, item.identifier);
+    if (!removed) return { ok: false, error: "item not found" };
+    return {
+      ok: true,
+      entry: { repoFullName: removed.repoFullName, identifier: removed.identifier, status: "queued" },
+    };
+  }
   try {
     const response = await fetchImpl(path, {
       method: "POST",

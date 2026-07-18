@@ -407,6 +407,10 @@ describe("LedgersPage (#4855)", () => {
 });
 
 describe("fetchLedgers (#4855)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   const jsonResponse = (status: number, payload: unknown) =>
     ({ ok: status >= 200 && status < 300, status, json: async () => payload }) as unknown as Response;
 
@@ -433,6 +437,17 @@ describe("fetchLedgers (#4855)", () => {
         throw new Error("connection refused");
       }),
     ).toEqual({ ok: false, error: "connection refused" });
+  });
+
+  it("#5963: in demo mode, returns a canned summary without ever calling fetch", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "1");
+    let called = false;
+    const result = await fetchLedgers(async () => {
+      called = true;
+      return jsonResponse(200, { summary: emptyLedgersSummary() });
+    });
+    expect(called).toBe(false);
+    expect(result.ok).toBe(true);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   type PortfolioQueueActionItem,
   type PortfolioQueueActionResult,
 } from "./lib/portfolio-queue-actions";
+import { resetDemoDataForTest } from "./lib/demo-data";
 import { PortfolioPage, PortfolioQueueActionsSection } from "./routes/portfolio";
 import type { PortfolioQueueResult } from "./lib/portfolio-queue";
 import {
@@ -293,6 +294,11 @@ describe("PortfolioPage queue actions (#4857)", () => {
 });
 
 describe("fetchPortfolioQueueItems / release / requeue (#4857)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetDemoDataForTest();
+  });
+
   const jsonResponse = (status: number, payload: unknown) =>
     ({ ok: status >= 200 && status < 300, status, json: async () => payload }) as unknown as Response;
 
@@ -339,6 +345,52 @@ describe("fetchPortfolioQueueItems / release / requeue (#4857)", () => {
         jsonResponse(409, { error: "queue_entry_not_in_progress" }),
       ),
     ).toEqual({ ok: false, error: "queue_entry_not_in_progress" });
+  });
+
+  describe("demo mode (#5963)", () => {
+    it("fetchPortfolioQueueItems returns the canned demo items without ever calling fetch", async () => {
+      vi.stubEnv("VITE_DEMO_MODE", "1");
+      let called = false;
+      const result = await fetchPortfolioQueueItems(async () => {
+        called = true;
+        return jsonResponse(200, { items: [] });
+      });
+      expect(called).toBe(false);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.items.length).toBeGreaterThan(0);
+    });
+
+    it("releasePortfolioQueueItem removes the item from the demo list and returns status 'queued', without calling fetch", async () => {
+      vi.stubEnv("VITE_DEMO_MODE", "1");
+      const before = await fetchPortfolioQueueItems();
+      const target = before.ok
+        ? before.items[0]!
+        : (() => {
+            throw new Error("expected demo items");
+          })();
+      let called = false;
+      const result = await releasePortfolioQueueItem(target, async () => {
+        called = true;
+        return jsonResponse(200, {});
+      });
+      expect(called).toBe(false);
+      expect(result).toEqual({
+        ok: true,
+        entry: { repoFullName: target.repoFullName, identifier: target.identifier, status: "queued" },
+      });
+      const after = await fetchPortfolioQueueItems();
+      expect(after.ok && after.items.find((i) => i.identifier === target.identifier)).toBeUndefined();
+    });
+
+    it("an action on an item not in the demo list returns a typed not-found error", async () => {
+      vi.stubEnv("VITE_DEMO_MODE", "1");
+      const result = await requeuePortfolioQueueItem({
+        apiBaseUrl: "x",
+        repoFullName: "nope/nope",
+        identifier: "missing",
+      });
+      expect(result).toEqual({ ok: false, error: "item not found" });
+    });
   });
 });
 

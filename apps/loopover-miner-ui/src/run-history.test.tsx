@@ -137,6 +137,10 @@ describe("RunHistoryPage (#4305)", () => {
 });
 
 describe("fetchRunStates (#4305)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   const jsonResponse = (status: number, payload: unknown) =>
     ({ ok: status >= 200 && status < 300, status, json: async () => payload }) as unknown as Response;
 
@@ -182,6 +186,17 @@ describe("fetchRunStates (#4305)", () => {
       throw new Error("connection refused");
     });
     expect(result).toEqual({ ok: false, error: "connection refused" });
+  });
+
+  it("#5963: in demo mode, returns canned rows without ever calling fetch", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "1");
+    let called = false;
+    const result = await fetchRunStates(async () => {
+      called = true;
+      return jsonResponse(200, { rows: [] });
+    });
+    expect(called).toBe(false);
+    expect(result.ok).toBe(true);
   });
 });
 
