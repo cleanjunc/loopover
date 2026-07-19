@@ -25,6 +25,7 @@ describe("review.visual wiring (#3609 / #3610)", () => {
       themeStorageKey: null,
       actionsFallback: false,
       bugAnalysis: false,
+      interactions: [],
     });
     expect(loadSpy).toHaveBeenCalledWith(expect.anything(), "acme/widgets");
     loadSpy.mockRestore();
@@ -66,6 +67,65 @@ describe("review.visual wiring (#3609 / #3610)", () => {
   it("bug_analysis defaults to false, byte-identical to today, when unset", async () => {
     const loadSpy = vi.spyOn(focusManifestLoader, "loadRepoFocusManifest").mockResolvedValue(parseFocusManifest({ review: { visual: { gif: true } } }));
     await expect(resolveVisualCaptureConfig({} as Env, "acme/widgets")).resolves.toEqual({ ...EMPTY_VISUAL_CONFIG, gif: true, bugAnalysis: false });
+    loadSpy.mockRestore();
+  });
+
+  it("resolves review.visual.interactions from the repo's focus manifest", async () => {
+    const manifest = parseFocusManifest({
+      review: {
+        visual: {
+          interactions: [
+            { selector: ".hover-target", action: "hover", label: "Blocks row hover" },
+            { selector: "#menu-button", action: "click" },
+          ],
+        },
+      },
+    });
+    const loadSpy = vi.spyOn(focusManifestLoader, "loadRepoFocusManifest").mockResolvedValue(manifest);
+    await expect(resolveVisualCaptureConfig({} as Env, "acme/widgets")).resolves.toEqual({
+      ...EMPTY_VISUAL_CONFIG,
+      interactions: [
+        { selector: ".hover-target", action: "hover", dragTo: null, path: null, label: "Blocks row hover" },
+        { selector: "#menu-button", action: "click", dragTo: null, path: null, label: null },
+      ],
+    });
+    loadSpy.mockRestore();
+  });
+
+  it("resolves a review.visual.interactions drag entry with drag_to from the repo's focus manifest", async () => {
+    const manifest = parseFocusManifest({
+      review: {
+        visual: {
+          interactions: [{ selector: ".card", action: "drag", drag_to: ".done-column", label: "Reorder card" }],
+        },
+      },
+    });
+    const loadSpy = vi.spyOn(focusManifestLoader, "loadRepoFocusManifest").mockResolvedValue(manifest);
+    await expect(resolveVisualCaptureConfig({} as Env, "acme/widgets")).resolves.toEqual({
+      ...EMPTY_VISUAL_CONFIG,
+      interactions: [{ selector: ".card", action: "drag", dragTo: ".done-column", path: null, label: "Reorder card" }],
+    });
+    loadSpy.mockRestore();
+  });
+
+  it("drops an interactions entry with a missing selector, an invalid action, or a drag action missing drag_to", async () => {
+    const manifest = parseFocusManifest({
+      review: {
+        visual: {
+          interactions: [
+            { action: "hover" },
+            { selector: ".unknown-action", action: "swipe" },
+            { selector: ".drag-no-target", action: "drag" },
+            { selector: ".also-ok", action: "click" },
+          ],
+        },
+      },
+    });
+    const loadSpy = vi.spyOn(focusManifestLoader, "loadRepoFocusManifest").mockResolvedValue(manifest);
+    await expect(resolveVisualCaptureConfig({} as Env, "acme/widgets")).resolves.toEqual({
+      ...EMPTY_VISUAL_CONFIG,
+      interactions: [{ selector: ".also-ok", action: "click", dragTo: null, path: null, label: null }],
+    });
     loadSpy.mockRestore();
   });
 });

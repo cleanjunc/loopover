@@ -1738,6 +1738,540 @@ describe("buildCapture scroll-GIF wiring (#3612)", () => {
   });
 });
 
+describe("buildCapture interaction-GIF wiring (#interaction-gif-capture)", () => {
+  it("never captures interaction frames when review.visual.interactions is unset, even when isScrollGifAvailable is true", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames");
+    try {
+      const result = await buildCapture(
+        createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com" }),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 50, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+      );
+      expect(captureInteractionSpy).not.toHaveBeenCalled();
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+    }
+  });
+
+  it("never captures interaction frames when interactions are configured but this build can't assemble GIFs (hosted mode)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(false);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames");
+    try {
+      const result = await buildCapture(
+        createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com" }),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 51, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(captureInteractionSpy).not.toHaveBeenCalled();
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+    }
+  });
+
+  it("captures + uploads both a before and after interaction GIF when interactions are configured and isScrollGifAvailable is true", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 52, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".blocks-row", action: "hover", label: "Blocks row hover" }] },
+      );
+      expect(result.interactions).toHaveLength(1);
+      expect(result.interactions[0]?.selector).toBe(".blocks-row");
+      expect(result.interactions[0]?.label).toBe("Blocks row hover");
+      expect(result.interactions[0]?.beforeGifUrl).toContain("/loopover/shot?key=");
+      expect(result.interactions[0]?.afterGifUrl).toContain("/loopover/shot?key=");
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://prod.example.com/", ".blocks-row", "hover", expect.anything(), {}, undefined);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/", ".blocks-row", "hover", expect.anything(), {}, undefined);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("uses the interaction's own path, defaulting to '/' when unset, independent of the PR's changed-file routes", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 53, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/settings.tsx"],
+        undefined,
+        { interactions: [{ selector: "#menu", action: "click", path: "/settings" }] },
+      );
+      // "click" is preview-only (SECURITY: never fires against production, see the "click/drag are
+      // preview-only" tests below) -- the interaction's own `path` still threads through correctly for
+      // the one call that does happen.
+      expect(captureInteractionSpy).toHaveBeenCalledTimes(1);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/settings", "#menu", "click", expect.anything(), {}, undefined);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("SECURITY: hover interactions still capture BOTH production and preview (non-mutating, safe to run against the live site)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 58, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(captureInteractionSpy).toHaveBeenCalledTimes(2);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://prod.example.com/", ".x", "hover", expect.anything(), {}, undefined);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/", ".x", "hover", expect.anything(), {}, undefined);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("SECURITY: click interactions NEVER fire against production, only the PR's own preview deploy", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 59, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: "#confirm-delete", action: "click" }] },
+      );
+      // Exactly one call, for the preview URL only -- proves click never reaches production (with 1 call
+      // total and the one call pinned to the preview origin, there is no room for a second, production call).
+      expect(captureInteractionSpy).toHaveBeenCalledTimes(1);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/", "#confirm-delete", "click", expect.anything(), {}, undefined);
+      expect(result.interactions[0]?.beforeGifUrl).toBeUndefined();
+      expect(result.interactions[0]?.afterGifUrl).toContain("/loopover/shot?key=");
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("threads the resolved theme + themeStorageKey into interaction capture", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 60, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }], themes: ["dark"], themeStorageKey: "theme" },
+      );
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://prod.example.com/", ".x", "hover", expect.anything(), { theme: "dark", themeStorageKey: "theme" }, undefined);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/", ".x", "hover", expect.anything(), { theme: "dark", themeStorageKey: "theme" }, undefined);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("threads a configured theme WITHOUT a themeStorageKey into interaction capture (media-emulation only, no forced localStorage)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 70, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }], themes: ["dark"] },
+      );
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://prod.example.com/", ".x", "hover", expect.anything(), { theme: "dark" }, undefined);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/", ".x", "hover", expect.anything(), { theme: "dark" }, undefined);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("omits an interaction entry entirely when neither side produces a GIF", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({ frames: [], authWalled: false });
+    try {
+      const result = await buildCapture(
+        createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() }),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 54, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+    }
+  });
+
+  it("caps capture at MAX_INTERACTIONS even when more are configured", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 55, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: Array.from({ length: 5 }, (_, i) => ({ selector: `.item-${i}`, action: "hover" as const })) },
+      );
+      expect(result.interactions).toHaveLength(3);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("threads dragTo through to captureInteractionFrames for a drag action", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 56, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/board.tsx"],
+        undefined,
+        { interactions: [{ selector: ".card", action: "drag", dragTo: ".done-column", label: "Reorder card" }] },
+      );
+      expect(result.interactions).toHaveLength(1);
+      expect(result.interactions[0]?.label).toBe("Reorder card");
+      // "drag" is preview-only too (same SECURITY reasoning as "click" — a real drag-and-drop can persist a
+      // reorder via a same-origin mutating request, so it must never run against production).
+      expect(captureInteractionSpy).toHaveBeenCalledTimes(1);
+      expect(captureInteractionSpy).toHaveBeenCalledWith(env, "https://preview.example.com/", ".card", "drag", expect.anything(), {}, ".done-column");
+      expect(result.interactions[0]?.beforeGifUrl).toBeUndefined();
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("gives a drag interaction its own fingerprint distinct from a hover/click on the same selector (no cache collision)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const dragResult = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 57, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/board.tsx"],
+        undefined,
+        { interactions: [{ selector: ".card", action: "drag", dragTo: ".done-column" }] },
+      );
+      const clickResult = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 57, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/board.tsx"],
+        undefined,
+        { interactions: [{ selector: ".card", action: "click" }] },
+      );
+      expect(dragResult.interactions[0]?.afterGifUrl).not.toBe(clickResult.interactions[0]?.afterGifUrl);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("reuses a cached interaction GIF without re-capturing frames on the next review of the same head", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const target = { repoFullName: "owner/repo", prNumber: 61, previewUrl: "https://preview.example.com" };
+      const files = ["apps/loopover-ui/src/routes/app.index.tsx"];
+      const interactionConfig = { interactions: [{ selector: ".x", action: "hover" as const }] };
+      const first = await buildCapture(env, "installation-token", target, files, undefined, interactionConfig);
+      expect(captureInteractionSpy).toHaveBeenCalledTimes(2); // before + after
+      const second = await buildCapture(env, "installation-token", target, files, undefined, interactionConfig);
+      expect(captureInteractionSpy).toHaveBeenCalledTimes(2); // no NEW calls — both slots served from cache
+      expect(second.interactions[0]?.beforeGifUrl).toBe(first.interactions[0]?.beforeGifUrl);
+      expect(second.interactions[0]?.afterGifUrl).toBe(first.interactions[0]?.afterGifUrl);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("does not upload an interaction GIF when frames come back non-empty but the page is auth-walled", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: true,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif");
+    try {
+      const result = await buildCapture(
+        createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() }),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 62, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(encodeSpy).not.toHaveBeenCalled();
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("does not capture interaction frames when there is no REVIEW_AUDIT storage, even with interactions configured and isScrollGifAvailable true", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames");
+    try {
+      const result = await buildCapture(
+        // No REVIEW_AUDIT and no PUBLIC_API_ORIGIN/REVIEW_AUDIT_S3_PUBLIC_URL — storage genuinely unavailable,
+        // as opposed to the outer buildCapture-level gate (interactionsConfigured.length > 0 &&
+        // isScrollGifAvailable()), which is satisfied here so this exercises captureInteractionGif's OWN guard.
+        createTestEnv({}),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 63, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(captureInteractionSpy).not.toHaveBeenCalled();
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+    }
+  });
+
+  it("does not capture interaction frames when REVIEW_AUDIT is configured but neither PUBLIC_API_ORIGIN nor REVIEW_AUDIT_S3_PUBLIC_URL is (no way to construct a servable GIF URL)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames");
+    try {
+      const result = await buildCapture(
+        createTestEnv({ PUBLIC_API_ORIGIN: "", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() }),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 64, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(captureInteractionSpy).not.toHaveBeenCalled();
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+    }
+  });
+
+  it("REGRESSION: does not throw computing the fingerprint for a drag interaction missing dragTo (manifest-level parsing normally requires it, but buildCapture's own config type allows it null/absent)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    try {
+      const result = await buildCapture(
+        createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", REVIEW_AUDIT: memoryReviewAudit() }),
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 65, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/board.tsx"],
+        undefined,
+        { interactions: [{ selector: ".card", action: "drag" }] },
+      );
+      // env.BROWSER is unavailable in this unit-test environment, so the real captureInteractionFrames
+      // fails open (no frames) regardless -- this test only proves the fingerprint computation itself
+      // (which reads interaction.dragTo before any drag-specific validation runs) never throws.
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+    }
+  });
+
+  it("degrades to a fresh interaction capture (never throws) when the GIF cache lookup itself fails", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({
+        PUBLIC_API_ORIGIN: "https://worker.example",
+        PUBLIC_SITE_ORIGIN: "https://prod.example.com",
+        REVIEW_AUDIT: memoryReviewAudit({ failGet: true }),
+      });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 67, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(captureInteractionSpy).toHaveBeenCalled(); // cache lookup failed -> falls through to a fresh capture
+      expect(result.interactions[0]?.beforeGifUrl).toContain("/loopover/shot?key=");
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("degrades to no interaction GIF (never throws) when captureInteractionFrames itself rejects", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockRejectedValue(new Error("browser binding exhausted"));
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 68, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+    }
+  });
+
+  it("still returns the interaction GIF URL even when persisting it fails (fire-and-forget put, mirrors uploadDiffImage/captureScrollGif's own pattern)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    try {
+      const env = createTestEnv({
+        PUBLIC_API_ORIGIN: "https://worker.example",
+        PUBLIC_SITE_ORIGIN: "https://prod.example.com",
+        REVIEW_AUDIT: memoryReviewAudit({ failPut: true }),
+      });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 69, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(result.interactions[0]?.beforeGifUrl).toContain("/loopover/shot?key=");
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+
+  it("does not upload an interaction GIF when encodeScrollGif itself returns null (encode failure)", async () => {
+    const gifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3])],
+      authWalled: false,
+    });
+    const encodeSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(null);
+    try {
+      const env = createTestEnv({ PUBLIC_API_ORIGIN: "https://worker.example", PUBLIC_SITE_ORIGIN: "https://prod.example.com", REVIEW_AUDIT: memoryReviewAudit() });
+      const result = await buildCapture(
+        env,
+        "installation-token",
+        { repoFullName: "owner/repo", prNumber: 66, previewUrl: "https://preview.example.com" },
+        ["apps/loopover-ui/src/routes/app.index.tsx"],
+        undefined,
+        { interactions: [{ selector: ".x", action: "hover" }] },
+      );
+      expect(result.interactions).toEqual([]);
+    } finally {
+      gifAvailableSpy.mockRestore();
+      captureInteractionSpy.mockRestore();
+      encodeSpy.mockRestore();
+    }
+  });
+});
+
 describe("hasSuccessfulBotCapture (#4110)", () => {
   const REAL_BEFORE = "https://api.example/loopover/shot?key=loopover%2Fshots%2Fbefore.png";
   const REAL_AFTER = "https://api.example/loopover/shot?key=loopover%2Fshots%2Fafter.png";

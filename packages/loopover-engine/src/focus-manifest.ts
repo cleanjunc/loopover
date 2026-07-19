@@ -1004,10 +1004,42 @@ export type VisualConfig = {
    *  new issue for it). false (default, every existing manifest) ⇒ byte-identical to today: the original
    *  regression-only prompt, no PR context sent, no "unrelated" finding category ever produced. */
   bugAnalysis: boolean;
+  /** `review.visual.interactions`: specific elements to interact with and capture as animated evidence
+   *  (hover/click) — for behavior a static screenshot can't show that isn't scroll-linked (see `gif` above
+   *  for scroll-linked evidence). Empty (default) ⇒ byte-identical to today, no interaction capture. */
+  interactions: VisualInteraction[];
 };
 
 /** A `prefers-color-scheme` value the capture pipeline can emulate before rendering (#3678). */
 export type VisualTheme = "light" | "dark";
+
+/** The interaction to perform on `selector` before capturing the "after" frames of a `VisualInteraction` —
+ *  a hover-triggered popover or CSS transition (`hover`), a click-triggered state change (`click`), or a
+ *  drag from `selector` onto `dragTo` (`drag`, e.g. a reorderable list/kanban card or a slider handle). */
+export type VisualInteractionAction = "hover" | "click" | "drag";
+
+/** One `review.visual.interactions[]` entry — a specific element to interact with and capture as animated
+ *  evidence, for behavior a static screenshot can't show: a hover-triggered popover, a CSS transition, a
+ *  click-triggered state change, or a drag. Rendered as its own "Interaction preview" row (one per entry, not
+ *  multiplied by viewport/theme — mirrors the contributor-facing animated-evidence contract documented in
+ *  e.g. metagraphed's SKILL.md), alongside (never replacing) the static before/after table. */
+export type VisualInteraction = {
+  /** CSS selector for the element to interact with — the drag SOURCE when `action` is `drag`. A selector
+   *  that matches nothing on the captured page yields no frames for that entry — fails open, never blocks
+   *  capture of the rest of the PR. */
+  selector: string;
+  /** The interaction to perform: `hover` (mouse over `selector`), `click`, or `drag` (requires `dragTo`). */
+  action: VisualInteractionAction;
+  /** The drag DESTINATION selector — required when `action` is `drag` (an entry missing it is dropped at
+   *  parse time), ignored otherwise. Like `selector`, a selector matching nothing fails open (no frames for
+   *  that entry) rather than blocking capture of the rest of the PR. */
+  dragTo: string | null;
+  /** The route path this interaction lives on. null (default) ⇒ "/" (the site root). */
+  path: string | null;
+  /** Human-readable name for the PR-comment row (e.g. "Blocks table row hover"). null (default) ⇒ the
+   *  selector itself is shown. */
+  label: string | null;
+};
 
 export type VisualPreviewConfig = {
   /** `review.visual.preview.url_template`: the repo's "after" preview URL, with `{number}` (PR number),
@@ -1046,6 +1078,7 @@ export const EMPTY_VISUAL_CONFIG: VisualConfig = {
   themeStorageKey: null,
   actionsFallback: false,
   bugAnalysis: false,
+  interactions: [],
 };
 
 /** One `review.path_instructions[]` entry: a manifest path glob + the public-safe instructions to apply when a
@@ -2952,6 +2985,7 @@ function overlayVisualConfig(base: VisualConfig, override: VisualConfig): Visual
     themeStorageKey: pickOverlayNullable(override.themeStorageKey, base.themeStorageKey),
     actionsFallback: override.actionsFallback ? override.actionsFallback : base.actionsFallback,
     bugAnalysis: override.bugAnalysis ? override.bugAnalysis : base.bugAnalysis,
+    interactions: override.interactions.length > 0 ? [...override.interactions] : [...base.interactions],
   };
 }
 
@@ -3157,7 +3191,8 @@ function visualConfigPresent(config: VisualConfig): boolean {
     config.enabled !== null ||
     config.themeStorageKey !== null ||
     config.actionsFallback ||
-    config.bugAnalysis
+    config.bugAnalysis ||
+    config.interactions.length > 0
   );
 }
 
@@ -3259,8 +3294,57 @@ function parseVisualConfig(value: JsonValue | undefined, warnings: string[]): Vi
   const themeStorageKey = parsePublicSafeText(record.theme_storage_key, "review.visual.theme_storage_key", warnings);
   const actionsFallback = normalizeOptionalBoolean(record.actions_fallback, "review.visual.actions_fallback", warnings) === true;
   const bugAnalysis = normalizeOptionalBoolean(record.bug_analysis, "review.visual.bug_analysis", warnings) === true;
+  const interactions = parseVisualInteractions(record.interactions, warnings);
 
-  return { productionUrl, preview: { urlTemplate }, routes: { paths, maxRoutes }, themes, gif, enabled, themeStorageKey, actionsFallback, bugAnalysis };
+  return { productionUrl, preview: { urlTemplate }, routes: { paths, maxRoutes }, themes, gif, enabled, themeStorageKey, actionsFallback, bugAnalysis, interactions };
+}
+
+const VISUAL_INTERACTION_ACTION_VALUES: readonly VisualInteractionAction[] = ["hover", "click", "drag"];
+// A hard cap so a hostile/huge manifest can't turn interaction capture into unbounded browser-render spend —
+// each entry is at least as expensive as a scroll-GIF capture (a full page render plus a settle wait).
+const MAX_VISUAL_INTERACTIONS = 5;
+
+/** Parse `review.visual.interactions` — specific elements to interact with and capture as animated evidence
+ *  (hover/click/drag), mirroring `parseReviewPreMergeChecks`'s "array of mappings" shape. A malformed/incomplete
+ *  entry is dropped with a warning rather than failing the whole list, same as every other manifest array
+ *  here — one bad entry never sinks the rest of a maintainer's config. */
+function parseVisualInteractions(value: JsonValue | undefined, warnings: string[]): VisualInteraction[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    warnings.push(`Manifest "review.visual.interactions" must be a list of interactions; ignoring it.`);
+    return [];
+  }
+  const out: VisualInteraction[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (out.length >= MAX_VISUAL_INTERACTIONS) {
+      warnings.push(`Manifest "review.visual.interactions" is capped at ${MAX_VISUAL_INTERACTIONS} entries; dropping the rest.`);
+      break;
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(`Manifest "review.visual.interactions[${index}]" must be a mapping; ignoring it.`);
+      continue;
+    }
+    const e = entry as Record<string, JsonValue>;
+    const selector = parsePublicSafeText(e.selector, `review.visual.interactions[${index}].selector`, warnings);
+    if (selector === null) {
+      warnings.push(`Manifest "review.visual.interactions[${index}].selector" is required; ignoring the entry.`);
+      continue;
+    }
+    const rawAction = typeof e.action === "string" ? (e.action.trim().toLowerCase() as VisualInteractionAction) : undefined;
+    if (!rawAction || !VISUAL_INTERACTION_ACTION_VALUES.includes(rawAction)) {
+      warnings.push(`Manifest "review.visual.interactions[${index}].action" must be "hover", "click", or "drag"; ignoring the entry.`);
+      continue;
+    }
+    const dragTo = parsePublicSafeText(e.drag_to, `review.visual.interactions[${index}].drag_to`, warnings);
+    if (rawAction === "drag" && dragTo === null) {
+      warnings.push(`Manifest "review.visual.interactions[${index}].drag_to" is required when action is "drag"; ignoring the entry.`);
+      continue;
+    }
+    const path = parsePublicSafeText(e.path, `review.visual.interactions[${index}].path`, warnings);
+    const label = parsePublicSafeText(e.label, `review.visual.interactions[${index}].label`, warnings);
+    out.push({ selector, action: rawAction, dragTo, path, label });
+  }
+  return out;
 }
 
 function parseAutoReviewTitleKeywords(value: JsonValue | undefined, warnings: string[]): string[] {
@@ -3576,6 +3660,15 @@ export function reviewConfigToJson(review: FocusManifestReviewConfig): JsonValue
     if (review.visual.themeStorageKey !== null) visual.theme_storage_key = review.visual.themeStorageKey;
     if (review.visual.actionsFallback) visual.actions_fallback = true;
     if (review.visual.bugAnalysis) visual.bug_analysis = true;
+    if (review.visual.interactions.length > 0) {
+      visual.interactions = review.visual.interactions.map((interaction) => {
+        const entry: Record<string, JsonValue> = { selector: interaction.selector, action: interaction.action };
+        if (interaction.dragTo !== null) entry.drag_to = interaction.dragTo;
+        if (interaction.path !== null) entry.path = interaction.path;
+        if (interaction.label !== null) entry.label = interaction.label;
+        return entry;
+      });
+    }
     out.visual = visual;
   }
   if (review.linkedIssueSatisfaction !== null) out.linkedIssueSatisfaction = review.linkedIssueSatisfaction;

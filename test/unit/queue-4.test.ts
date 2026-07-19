@@ -65,6 +65,8 @@ import { aiReviewCacheInputFingerprint } from "../../src/review/ai-review-cache-
 import { fingerprint as reviewMemoryFingerprint } from "../../src/review/review-memory-match";
 import { upsertRepoFocusManifest } from "../../src/signals/focus-manifest-loader";
 import * as pixelDiffModule from "../../src/review/visual/pixel-diff";
+import * as scrollGifModule from "../../src/review/visual/scroll-gif";
+import * as shotModule from "../../src/review/visual/shot";
 import * as focusManifestLoaderModule from "../../src/signals/focus-manifest-loader";
 import { normalizeRegistryPayload } from "../../src/registry/normalize";
 import { persistRegistrySnapshot } from "../../src/registry/sync";
@@ -3696,6 +3698,180 @@ describe("queue processors", () => {
       liveCiSpy.mockRestore();
       isVisualDiffAvailableSpy.mockRestore();
       compareScreenshotsSpy.mockRestore();
+    }
+  });
+
+  // review.visual.interactions (config-as-code): threads all the way from the real .loopover.yml raw-fetch
+  // through resolveVisualCaptureConfig -> buildCapture's interaction-GIF branch -> the `let interactionPreviews`
+  // declared outside the capture try/catch -> the PR panel's `interactions` field -> unified-comment-bridge's
+  // "Interaction preview" collapsible. Unlike visual-capture.test.ts / visual-collapsible.test.ts (which call
+  // buildCapture / buildUnifiedCommentBody directly with an interactions array already populated) this is the
+  // ONLY test that proves interactionPreviews.length > 0 is ever actually reached through the real webhook
+  // path -- every other processors.ts test leaves review.visual.interactions unconfigured, so the
+  // `interactionPreviews.length > 0 ? { interactions: interactionPreviews } : {}` ternary in processors.ts
+  // only ever takes its false branch elsewhere. hover is used (not click/drag) so the interaction fires
+  // against PUBLIC_SITE_ORIGIN directly, without needing a real discovered preview deploy (this fixture's
+  // deployment/checks/PR-comment discovery all 404, same as the sibling wiring test above).
+  it("threads review.visual.interactions from the real .loopover.yml into the capture pipeline and renders an Interaction preview section", async () => {
+    const gifStore = new Map<string, Uint8Array>();
+    const reviewAudit = {
+      async get(key: string) {
+        const bytes = gifStore.get(key);
+        return bytes ? ({ body: new Response(bytes).body } as unknown as R2ObjectBody) : null;
+      },
+      async put(key: string, value: unknown) {
+        const bytes = new Uint8Array(await new Response(value as BodyInit).arrayBuffer());
+        gifStore.set(key, bytes);
+        return { key } as unknown as R2Object;
+      },
+    } as unknown as R2Bucket;
+    const env = createTestEnv({
+      GITHUB_APP_PRIVATE_KEY: await generatePrivateKeyPem(),
+      LOOPOVER_REVIEW_SCREENSHOTS: "true",
+      PUBLIC_API_ORIGIN: "https://worker.example",
+      PUBLIC_SITE_ORIGIN: "https://prod.example.com",
+      REVIEW_AUDIT: reviewAudit,
+    });
+    await persistRegistrySnapshot(
+      asCloudEnv(env),
+      normalizeRegistryPayload(
+        { "JSONbored/gittensory": { emission_share: 0.01, issue_discovery_share: 0 } },
+        { kind: "raw-github", url: "https://example.test" },
+        "2026-05-23T00:00:00.000Z",
+      ),
+    );
+    await upsertRepositorySettings(env, {
+      repoFullName: "JSONbored/gittensory",
+      autoLabelEnabled: false,
+      autonomy: { update_branch: "auto" },
+    });
+    let postedBody = "";
+    const isScrollGifAvailableSpy = vi.spyOn(scrollGifModule, "isScrollGifAvailable").mockReturnValue(true);
+    const captureInteractionFramesSpy = vi.spyOn(shotModule, "captureInteractionFrames").mockResolvedValue({
+      frames: [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])],
+      authWalled: false,
+    });
+    const encodeScrollGifSpy = vi.spyOn(scrollGifModule, "encodeScrollGif").mockResolvedValue(new Uint8Array([7, 8, 9]));
+    const liveCiSpy = vi.spyOn(backfillModule, "fetchLiveCiAggregatePreferGraphQl").mockResolvedValue({
+      ciState: "passed",
+      hasPending: false,
+      hasVisiblePending: false,
+      hasMissingRequiredContext: false,
+      failingDetails: [],
+      nonRequiredFailingDetails: [],
+      advisoryHoldDetails: [],
+      ciCompletenessWarning: null,
+    });
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      const method = init?.method ?? "GET";
+      if (url === "https://raw.githubusercontent.com/JSONbored/gittensory/HEAD/.loopover.yml") {
+        return new Response(
+          "settings:\n  commentMode: detected_contributors_only\n  publicAudienceMode: gittensor_only\n  publicSignalLevel: standard\n  publicSurface: comment_and_label\n  checkRunMode: \"off\"\n  checkRunDetailLevel: minimal\n  backfillEnabled: true\nreview:\n  visual:\n    interactions:\n      - selector: \".menu-button\"\n        action: hover\n        label: \"Menu hover\"\n",
+        );
+      }
+      if (url === "https://api.gittensor.io/miners") {
+        return Response.json([
+          {
+            uid: 7,
+            githubUsername: "oktofeesh1",
+            githubId: "123",
+            totalPrs: 4,
+            totalMergedPrs: 3,
+            totalOpenPrs: 1,
+            totalClosedPrs: 0,
+            totalOpenIssues: 0,
+            totalClosedIssues: 0,
+            totalSolvedIssues: 0,
+            totalValidSolvedIssues: 0,
+            isEligible: true,
+            credibility: 1,
+            eligibleRepoCount: 1,
+            hotkey: "must-not-leak",
+          },
+        ]);
+      }
+      if (url === "https://api.gittensor.io/miners/123") {
+        return Response.json({
+          repositories: [
+            {
+              repositoryFullName: "JSONbored/gittensory",
+              totalPrs: "4",
+              totalMergedPrs: "3",
+              totalOpenPrs: "1",
+              totalClosedPrs: "0",
+              totalOpenIssues: "0",
+              totalClosedIssues: "0",
+              isEligible: true,
+              credibility: "1.000000",
+            },
+          ],
+        });
+      }
+      if (url === "https://api.gittensor.io/miners/123/prs") return Response.json([]);
+      if (url === "https://mirror.gittensor.io/api/v1/miners/123/issues") return Response.json({ issues: [] });
+      if (url.endsWith("/users/oktofeesh1")) return Response.json({ login: "oktofeesh1", public_repos: 2, followers: 1 });
+      if (url.includes("/users/oktofeesh1/repos")) return Response.json([{ language: "TypeScript" }]);
+      if (url.includes("/access_tokens")) {
+        return Response.json({ token: "installation-token", expires_at: "2026-05-28T00:04:00.000Z" });
+      }
+      if (url.includes("/pulls/3/files")) {
+        return Response.json([{ filename: "apps/loopover-ui/src/routes/app.index.tsx", additions: 5, deletions: 1, status: "modified" }]);
+      }
+      if (/\/pulls\/3(?:\?|$)/.test(url)) return Response.json({ number: 3, mergeable_state: "clean" });
+      if (url.includes("/check-runs") && method === "GET") return Response.json({ total_count: 0, check_runs: [] });
+      if (url.includes("/check-runs") && method === "POST") return Response.json({ id: 901 }, { status: 201 });
+      if (url.includes("/check-runs/901") && method === "PATCH") return Response.json({ id: 901 });
+      if (url.includes("/issues/3/comments") && method === "GET") return Response.json([]);
+      if (url.includes("/issues/3/comments") && method === "POST") {
+        postedBody = String((JSON.parse(String(init?.body ?? "{}")) as { body?: string }).body ?? "");
+        return Response.json({ id: 1, html_url: "https://github.com/comment/1" }, { status: 201 });
+      }
+      // Preview discovery (deployments / commit checks / PR comments): none configured for this fixture, so
+      // the interaction's "after" (preview) side never captures -- only its "before" (production, via
+      // PUBLIC_SITE_ORIGIN) side does, which is enough on its own to prove the field threads through end to
+      // end (buildInteractionPreviewCollapsible renders a row when EITHER side has a GIF).
+      return new Response("not found", { status: 404 });
+    });
+
+    try {
+      await processJob(env, {
+        type: "github-webhook",
+        deliveryId: "pr-interactions-wiring",
+        eventName: "pull_request",
+        payload: {
+          action: "synchronize",
+          installation: {
+            id: 123,
+            account: { login: "JSONbored", id: 1, type: "User" },
+            repository_selection: "selected",
+            permissions: { metadata: "read", pull_requests: "read", issues: "write", checks: "write" },
+            events: ["issues", "issue_comment", "pull_request", "repository", "installation_repositories"],
+          },
+          repository: { name: "gittensory", full_name: "JSONbored/gittensory", private: false, owner: { login: "JSONbored" } },
+          pull_request: {
+            number: 3,
+            title: "Add a hoverable menu button",
+            state: "open",
+            user: { login: "oktofeesh1" },
+            head: { sha: "interactionswiring123" },
+            labels: [{ name: "bug" }],
+            body: "Fixes #1\n\nValidation: npm test",
+          },
+        },
+      });
+
+      // The real webhook path resolved review.visual.interactions from the fetched .loopover.yml, captured a
+      // hover GIF via the real buildCapture -> captureInteractionGif chain, and threaded the result through
+      // processors.ts's interactionPreviews variable into the rendered unified comment.
+      expect(postedBody).toContain("Interaction preview");
+      expect(postedBody).toContain("Menu hover");
+      expect(postedBody).toContain("Visual preview");
+    } finally {
+      liveCiSpy.mockRestore();
+      isScrollGifAvailableSpy.mockRestore();
+      captureInteractionFramesSpy.mockRestore();
+      encodeScrollGifSpy.mockRestore();
     }
   });
 

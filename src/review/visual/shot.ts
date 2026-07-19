@@ -441,6 +441,171 @@ export async function captureScrollFrames(env: Env, url: string, viewport: Viewp
   }
 }
 
+// Mirrors MAX_SCROLL_STEPS/SCROLL_SETTLE_MS's reasoning above: a fixed, small number of post-interaction
+// frames is enough evidence for a hover/click-triggered CSS transition or state change without turning this
+// into an unbounded "record everything" system. One extra frame at rest (step 0, before the interaction
+// fires) plus 3 post-interaction frames covers "mid-transition" and "settled" without much added cost.
+const MAX_INTERACTION_STEPS = 4;
+const INTERACTION_ELEMENT_TIMEOUT_MS = 3_000;
+// A drag needs enough intermediate mouse-move events for a drag-and-drop library's own dragover/mousemove
+// listeners to register motion (a single instant jump from source to destination often fails to trigger a
+// library's drop-target highlighting) — 8 steps is a cheap, smooth-enough interpolation without materially
+// adding to this capture mode's already-heaviest-in-class cost (mirrors MAX_SCROLL_STEPS's reasoning: enough
+// to be convincing evidence, not a frame-perfect recording).
+const DRAG_MOVE_STEPS = 8;
+
+export type InteractionAction = "hover" | "click" | "drag";
+
+/** Drag `source` onto `destination` via a real mouse-down → interpolated-move → mouse-up sequence, using each
+ *  element's own bounding-box CENTER as the drag/drop point. A `null` bounding box (a display:none or
+ *  zero-size element) means there is nothing visibly draggable to animate — a no-op, not an error, matching
+ *  this whole capture mode's fail-open contract. Interpolating {@link DRAG_MOVE_STEPS} intermediate positions
+ *  (rather than one instant jump) mirrors how a real user drags and is what most drag-and-drop libraries'
+ *  own dragover/mousemove listeners need to actually register motion and highlight a drop target.
+ *
+ *  Scrolls each element into view (sequentially, before reading ITS OWN bounding box) the same way Puppeteer's
+ *  own `hover()`/`click()` do internally for a single element — `boundingBox()` alone does not scroll, so a
+ *  drag source/destination below the fold (the documented use case: "a reorderable list/kanban card") would
+ *  otherwise read a stale/off-viewport position and target the wrong screen point. Scrolling to the
+ *  destination after already reading the source's box is safe even if it scrolls the source back out of
+ *  view — the source's coordinates were already captured and the mouse sequence below uses those fixed
+ *  numbers, not a live re-query. */
+async function performDrag(
+  page: { mouse: { move: (x: number, y: number) => Promise<void>; down: () => Promise<void>; up: () => Promise<void> } },
+  source: { boundingBox: () => Promise<{ x: number; y: number; width: number; height: number } | null>; scrollIntoViewIfNeeded?: () => Promise<void> },
+  destination: { boundingBox: () => Promise<{ x: number; y: number; width: number; height: number } | null>; scrollIntoViewIfNeeded?: () => Promise<void> },
+): Promise<void> {
+  await source.scrollIntoViewIfNeeded?.().catch(() => undefined);
+  const sourceBox = await source.boundingBox();
+  await destination.scrollIntoViewIfNeeded?.().catch(() => undefined);
+  const destinationBox = await destination.boundingBox();
+  if (!sourceBox || !destinationBox) return;
+  const sourceX = sourceBox.x + sourceBox.width / 2;
+  const sourceY = sourceBox.y + sourceBox.height / 2;
+  const destinationX = destinationBox.x + destinationBox.width / 2;
+  const destinationY = destinationBox.y + destinationBox.height / 2;
+  await page.mouse.move(sourceX, sourceY);
+  await page.mouse.down();
+  for (let step = 1; step <= DRAG_MOVE_STEPS; step++) {
+    const t = step / DRAG_MOVE_STEPS;
+    await page.mouse.move(sourceX + (destinationX - sourceX) * t, sourceY + (destinationY - sourceY) * t);
+  }
+  await page.mouse.up();
+}
+
+/**
+ * Capture a short sequence of frames around a specific interaction: one frame at rest, then trigger `action`
+ * on `selector` (a drag onto `dragTo` when `action` is `"drag"`), then a few more frames at intervals to
+ * catch a CSS transition or JS-driven state change mid-flight and settled — evidence for a hover-triggered
+ * popover, a click-triggered state change, a drag-and-drop reorder, or similar behavior a single static
+ * screenshot can't show.
+ *
+ * Mirrors `captureScrollFrames`'s SSRF guard, sub-request interception, and auth-wall detection exactly
+ * (duplicated rather than shared — see that function's own doc comment for why). `selector`/`dragTo` matching
+ * nothing on the page is NOT an error — it's a normal "this interaction doesn't apply to this side" outcome
+ * (e.g. an element only present after the PR's change adds it): returns empty frames, the same fail-open
+ * contract as every other capture failure here.
+ */
+export async function captureInteractionFrames(
+  env: Env,
+  url: string,
+  selector: string,
+  action: InteractionAction,
+  viewport: Viewport = VIEWPORT,
+  opts: CaptureShotOptions = {},
+  dragTo?: string | undefined,
+): Promise<{ frames: Uint8Array[]; authWalled: boolean }> {
+  if (!url || !isSafeHttpUrl(url) || (opts.isAllowedUrl && !opts.isAllowedUrl(url))) {
+    console.log(JSON.stringify({ event: "render_interaction_frames_blocked", url: String(url).slice(0, 120) }));
+    return { frames: [], authWalled: false };
+  }
+  if (!env.BROWSER) return { frames: [], authWalled: false };
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+  try {
+    browser = await puppeteer.launch(env.BROWSER as unknown as Parameters<typeof puppeteer.launch>[0]);
+    const page = await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on("request", (request: ScreenshotRequest) => {
+      const requestUrl = request.url();
+      let protocol = "";
+      try {
+        protocol = new URL(requestUrl).protocol;
+      } catch {
+        request.abort().catch(() => undefined);
+        return;
+      }
+      if (protocol === "http:" || protocol === "https:") {
+        const isAllowedNavigation = !request.isNavigationRequest() || !opts.isAllowedUrl || opts.isAllowedUrl(requestUrl);
+        if (!isSafeHttpUrl(requestUrl) || !isAllowedNavigation) {
+          console.log(JSON.stringify({ event: "render_interaction_frames_request_blocked", url: requestUrl.slice(0, 120) }));
+          request.abort().catch(() => undefined);
+          return;
+        }
+      }
+      request.continue().catch(() => undefined);
+    });
+    await page.setViewport(viewport);
+    if (opts.theme) await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: opts.theme }]);
+    await page.goto(url, { waitUntil: "networkidle0", timeout: 20000 });
+    if (!isSafeHttpUrl(page.url()) || (opts.isAllowedUrl && !opts.isAllowedUrl(page.url()))) {
+      console.log(JSON.stringify({ event: "render_interaction_frames_redirect_blocked", url, final: page.url().slice(0, 200) }));
+      return { frames: [], authWalled: false };
+    }
+    if (isAuthWallUrl(page.url()) && !isAuthWallUrl(url)) {
+      console.log(JSON.stringify({ event: "render_interaction_frames_auth_walled", url, final: page.url().slice(0, 200) }));
+      return { frames: [], authWalled: true };
+    }
+    // A configured themeStorageKey (#4109) ALSO forces the theme via localStorage, then reloads -- mirrors
+    // captureShot's own fallback exactly (see CaptureShotOptions.theme's doc for what this fixes and why).
+    if (opts.theme && opts.themeStorageKey) {
+      const storageKey = opts.themeStorageKey;
+      const storageValue = opts.theme;
+      if (!(await forceThemeStorage(page, storageKey, storageValue))) return { frames: [], authWalled: false };
+      await page.reload({ waitUntil: "networkidle0", timeout: THEME_STORAGE_RELOAD_TIMEOUT_MS });
+    }
+    const element = await page.waitForSelector(selector, { timeout: INTERACTION_ELEMENT_TIMEOUT_MS }).catch(() => null);
+    if (!element) {
+      console.log(JSON.stringify({ event: "render_interaction_frames_selector_not_found", url, selector: selector.slice(0, 120) }));
+      return { frames: [], authWalled: false };
+    }
+    let dragToElement: typeof element | null = null;
+    if (action === "drag") {
+      if (!dragTo) {
+        console.log(JSON.stringify({ event: "render_interaction_frames_missing_drag_target", url, selector: selector.slice(0, 120) }));
+        return { frames: [], authWalled: false };
+      }
+      dragToElement = await page.waitForSelector(dragTo, { timeout: INTERACTION_ELEMENT_TIMEOUT_MS }).catch(() => null);
+      if (!dragToElement) {
+        console.log(JSON.stringify({ event: "render_interaction_frames_drag_target_not_found", url, dragTo: dragTo.slice(0, 120) }));
+        return { frames: [], authWalled: false };
+      }
+    }
+    const frames: Uint8Array[] = [];
+    // Frame 0: the at-rest state, before the interaction fires — the "before" half of the animated evidence.
+    frames.push((await page.screenshot({ type: "png", fullPage: false })) as Uint8Array);
+    if (action === "hover") {
+      await element.hover();
+    } else if (action === "click") {
+      await element.click();
+    } else {
+      await performDrag(page, element, dragToElement!);
+    }
+    for (let step = 1; step < MAX_INTERACTION_STEPS; step++) {
+      // Reuses captureScrollFrames' own settle delay (SCROLL_SETTLE_MS/waitForScrollSettle above) rather than
+      // a second, numerically-identical constant+function -- same 350ms "long enough for a typical transition,
+      // short enough to stay a quick evidence clip" reasoning applies to a post-interaction frame too.
+      await waitForScrollSettle();
+      frames.push((await page.screenshot({ type: "png", fullPage: false })) as Uint8Array);
+    }
+    return { frames, authWalled: false };
+  } catch (error) {
+    console.log(JSON.stringify({ event: "render_interaction_frames_error", mode: "binding", url, message: String(error).slice(0, 200) }));
+    return { frames: [], authWalled: false };
+  } finally {
+    if (browser) await browser.close().catch(() => undefined);
+  }
+}
+
 export async function handleShot(request: Request, env: Env, opts: ShotOptions = {}): Promise<Response> {
   const params = new URL(request.url).searchParams;
   const r2Prefix = `${opts.namespace ?? "loopover"}/shots/`;
