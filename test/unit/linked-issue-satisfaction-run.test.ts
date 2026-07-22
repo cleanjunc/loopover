@@ -13,6 +13,7 @@ import {
 } from "../../src/db/repositories";
 import { linkedIssueSatisfactionCacheInputFingerprint } from "../../src/review/linked-issue-satisfaction-cache-input";
 import * as signalTrackingWire from "../../src/review/signal-tracking-wire";
+import { MAX_BODY_CHARS } from "../../src/services/linked-issue-satisfaction";
 import { createSignalStore } from "../../src/review/signal-tracking-wire";
 import { clearInstallationTokenCacheForTest } from "../../src/github/app";
 import { normalizeRegistryPayload } from "../../src/registry/normalize";
@@ -479,6 +480,35 @@ describe("runLinkedIssueSatisfactionForAdvisory (processor wiring, #1961/#3906)"
         metadata: { confidence: 0.9 },
       });
       expect(history.overrides).toEqual([]); // firing alone is never an override
+    });
+
+    it("captures the bounded raw assessment context in the fired event's metadata (#8129)", async () => {
+      stubIssueFetch();
+      const run = vi.fn(async () => ({ response: satisfactionJson({ status: "unaddressed", confidence: 0.9 }) }));
+      const env = enabledEnv(run);
+      await runLinkedIssueSatisfactionForAdvisory(env, { mode: "live", settings: blockMode, advisory: advisory(), repoFullName: "acme/widgets", pr, author: "alice", files, confirmedContributor: true, installationId: 1 });
+
+      const [fired] = (await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0)).fired;
+      // The exact raw context the assessment ran on, bounded by LinkedIssueSatisfactionInput's own limits.
+      expect(fired!.metadata).toMatchObject({
+        confidence: 0.9,
+        issueText,
+        prTitle: pr.title,
+        prBody: pr.body,
+        diff: buildAiReviewDiff(files),
+      });
+    });
+
+    it("truncates an over-limit prBody to MAX_BODY_CHARS in the captured metadata (#8129)", async () => {
+      stubIssueFetch();
+      const run = vi.fn(async () => ({ response: satisfactionJson({ status: "unaddressed", confidence: 0.9 }) }));
+      const env = enabledEnv(run);
+      const oversizedPr = { ...pr, body: "x".repeat(MAX_BODY_CHARS + 500) };
+      await runLinkedIssueSatisfactionForAdvisory(env, { mode: "live", settings: blockMode, advisory: advisory(), repoFullName: "acme/widgets", pr: oversizedPr, author: "alice", files, confirmedContributor: true, installationId: 1 });
+
+      const [fired] = (await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0)).fired;
+      expect((fired!.metadata as { prBody: string }).prBody).toHaveLength(MAX_BODY_CHARS);
+      expect((fired!.metadata as { prBody: string }).prBody).toBe("x".repeat(MAX_BODY_CHARS));
     });
 
     it("ADVISORY mode records NO fired signal for the same 'unaddressed' verdict (#8101 — no finding, no signal)", async () => {

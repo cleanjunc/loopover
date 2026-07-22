@@ -492,6 +492,7 @@ import { buildSlopAssessment, type SlopBand } from "../signals/slop";
 import { copycatWouldActOnPersistedScore } from "../signals/copycat";
 import { buildStructuralImprovementAssessment } from "../signals/improvement";
 import { runLoopOverLinkedIssueSatisfaction } from "../services/linked-issue-satisfaction-run";
+import { MAX_BODY_CHARS, MAX_DIFF_CHARS, MAX_ISSUE_TEXT_CHARS } from "../services/linked-issue-satisfaction";
 import { decidePublicSurface } from "../signals/settings-preview";
 import {
   buildFocusManifestGuidance,
@@ -7553,7 +7554,16 @@ export async function runLinkedIssueSatisfactionForAdvisory(
           targetKey: `${args.repoFullName}#${args.pr.number}`,
           outcome: result.result.status,
           occurredAt: nowIso(),
-          metadata: { confidence: result.result.confidence },
+          // #8129: capture the SAME bounded raw context the assessment ran on (LinkedIssueSatisfactionInput's
+          // own bounds, imported — never re-derived), so #8082's backtest primitives can replay a changed
+          // assessment prompt/logic against this corpus, not just re-threshold the stored confidence.
+          metadata: {
+            confidence: result.result.confidence,
+            issueText: issueText.trim().slice(0, MAX_ISSUE_TEXT_CHARS),
+            prTitle: args.pr.title,
+            prBody: (args.pr.body ?? "").trim().slice(0, MAX_BODY_CHARS),
+            diff: diff.slice(0, MAX_DIFF_CHARS),
+          },
         })
         .catch(() => undefined);
     }

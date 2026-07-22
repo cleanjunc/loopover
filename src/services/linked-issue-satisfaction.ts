@@ -29,9 +29,12 @@ export type LinkedIssueSatisfactionStatus = (typeof LINKED_ISSUE_SATISFACTION_ST
 export const LINKED_ISSUE_SATISFACTION_CONFIDENCE_FLOOR = 0.5;
 
 const MAX_RATIONALE_LENGTH = 400;
-const MAX_ISSUE_TEXT_CHARS = 6000;
-const MAX_DIFF_CHARS = 60000;
-const MAX_BODY_CHARS = 2000;
+// Exported for #8129: the fired-event metadata capture at the linked_issue_scope_mismatch recording site
+// (src/queue/processors.ts) bounds its stored raw context with these EXACT constants, so the corpus always
+// reflects what the assessment actually saw.
+export const MAX_ISSUE_TEXT_CHARS = 6000;
+export const MAX_DIFF_CHARS = 60000;
+export const MAX_BODY_CHARS = 2000;
 
 export type LinkedIssueSatisfactionInput = {
   /** The already-fetched linked-issue title + body text (grounding already resolved this — see
