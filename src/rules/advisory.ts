@@ -37,6 +37,7 @@ import { nowIso } from "../utils/json";
 import { LOOPOVER_GATE_CHECK_NAME } from "../review/check-names";
 import { CLA_CHECK_UNRESOLVED_CODE, CLA_CONSENT_MISSING_CODE } from "../review/cla-check";
 import { REVIEW_THREAD_BLOCKER_CODE } from "../review/review-thread-findings";
+import { createSignalStore } from "../review/signal-tracking-wire";
 import { labelMatchesPattern } from "../scoring/preview";
 
 export type GateCheckConclusion = "success" | "failure" | "action_required" | "neutral" | "skipped";
@@ -583,17 +584,30 @@ function promoteAdvisoryToBlock(policy: GateCheckPolicy): GateCheckPolicy {
   };
 }
 
+/** #8104: caller-supplied context for best-effort calibration recording. When present, every finding that lands
+ *  in `configuredBlockers` — the one computation where any recognized code becomes a gate-authority-bearing
+ *  decision — is recorded via the shared signal-tracking module (#7982). Optional so the pure evaluation paths
+ *  (dry-run would-be re-eval, the engine twin, sweep summaries, `@loopover resolve`/`explain` re-derivations,
+ *  check-run publish fallback) stay side-effect-free; only the real gate-decision site threads it through. */
+export type GateSignalRecordingContext = {
+  env: Env;
+  repoFullName: string;
+  prNumber: number;
+};
+
 /** Public entry. In normal mode this is exactly `evaluateGateCheckCore`. In dry-run mode (#gate-dryrun) it ALSO runs
  *  the core eval with advisory sub-gates promoted to block and attaches that as `displayConclusion` — the would-be
  *  merge/close/manual verdict — while the POSTED `conclusion` stays the real, non-enforcing one. */
-export function evaluateGateCheck(advisoryResult: Advisory, policy: GateCheckPolicy = {}): GateCheckEvaluation {
-  const result = evaluateGateCheckCore(advisoryResult, policy);
+export function evaluateGateCheck(advisoryResult: Advisory, policy: GateCheckPolicy = {}, signals?: GateSignalRecordingContext): GateCheckEvaluation {
+  const result = evaluateGateCheckCore(advisoryResult, policy, signals);
   if (!policy.dryRun) return result;
+  // The would-be re-eval deliberately gets NO signal context: promoted advisory findings are not real gate
+  // decisions, and recording them would double-count every blocker a dry-run repo's real eval already recorded.
   const wouldBe = evaluateGateCheckCore(advisoryResult, promoteAdvisoryToBlock(policy));
   return { ...result, displayConclusion: wouldBe.conclusion };
 }
 
-function evaluateGateCheckCore(advisoryResult: Advisory, policy: GateCheckPolicy = {}): GateCheckEvaluation {
+function evaluateGateCheckCore(advisoryResult: Advisory, policy: GateCheckPolicy = {}, signals?: GateSignalRecordingContext): GateCheckEvaluation {
   const warnings = advisoryResult.findings.filter((finding) => finding.severity === "warning");
   // App/infra state (repo not synced yet, PR not cached): loopover cannot evaluate this PR yet, so the
   // gate is NEUTRAL (non-blocking) and re-evaluates automatically on the next sync/webhook. Never block a
@@ -612,6 +626,24 @@ function evaluateGateCheckCore(advisoryResult: Advisory, policy: GateCheckPolicy
   // pass/fail. Readiness/quality stays advisory-only.
   const effective = applyMergeReadinessGate(policy);
   const configuredBlockers = advisoryResult.findings.filter((finding) => isConfiguredGateBlocker(finding, effective));
+  // #8104: record a fired event for every configured blocker, generically — one wiring site covers every
+  // current and future code `isConfiguredGateBlocker` recognizes, instead of one bespoke wiring PR per code.
+  // Best-effort fire-and-forget per #7982's SignalStore discipline: a failure to record a signal must never
+  // fail (or slow) the review pass that produced it, so nothing here is awaited and every rejection is dropped.
+  if (signals) {
+    const store = createSignalStore(signals.env);
+    for (const finding of configuredBlockers) {
+      void store
+        .recordRuleFired({
+          ruleId: finding.code,
+          targetKey: `${signals.repoFullName}#${signals.prNumber}`,
+          outcome: finding.severity,
+          occurredAt: nowIso(),
+          ...(finding.confidence !== undefined ? { metadata: { confidence: finding.confidence } } : {}),
+        })
+        .catch(() => undefined);
+    }
+  }
   const qualityWarning = buildQualityGateWarning(effective);
   const slopBlocker = buildSlopGateBlocker(effective);
   const blockers = [...configuredBlockers, ...(slopBlocker ? [slopBlocker] : [])];
@@ -952,6 +984,27 @@ function isEvaluationBlocker(code: string, policy: GateCheckPolicy): boolean {
 // (#4603) is "advisory_only" -- the floor never softens a blocker into a non-blocker on its own. Exported for
 // resolveAiReviewLowConfidenceHold (below) and for the packages/loopover-engine gate-decision twin's own copy.
 export const DEFAULT_AI_REVIEW_CLOSE_CONFIDENCE = 0.93;
+
+/** Every finding code `isConfiguredGateBlocker` below recognizes, in its branch order (#8104). Kept
+ *  IMMEDIATELY adjacent to that function so an edit to one is an edit to both, and drift-guarded by test:
+ *  each listed code must be blockable under an everything-block policy, and an unrecognized code must not be.
+ *  `recordReversalSignals` (outcomes-wire.ts) iterates this list to mark prior fired events "reversed" for
+ *  every blocker code generically, instead of hardcoding one code per wiring PR. */
+export const CONFIGURED_GATE_BLOCKER_CODES: readonly string[] = Object.freeze([
+  "missing_linked_issue",
+  "duplicate_pr_risk",
+  ...AI_JUDGMENT_BLOCKER_CODES,
+  REVIEW_THREAD_BLOCKER_CODE,
+  "secret_leak",
+  "pre_merge_check_required",
+  "manifest_missing_tests",
+  "manifest_linked_issue_required",
+  "self_authored_linked_issue",
+  "linked_issue_scope_mismatch",
+  "content_lane_deliverable_missing",
+  "lockfile_tamper_risk",
+  CLA_CONSENT_MISSING_CODE,
+]);
 
 function isConfiguredGateBlocker(finding: AdvisoryFinding, policy: GateCheckPolicy): boolean {
   const code = finding.code;

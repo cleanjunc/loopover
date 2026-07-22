@@ -464,18 +464,30 @@ describe("runLinkedIssueSatisfactionForAdvisory (processor wiring, #1961/#3906)"
       expect(gate.blockers).toHaveLength(0);
     });
 
-    it("BLOCK mode + 'unaddressed' records a linked_issue_scope_mismatch fired signal in the shared calibration store (#8101)", async () => {
+    it("BLOCK mode + 'unaddressed' records the fired signal at gate evaluation, not at the push site (#8104, supersedes #8101)", async () => {
       stubIssueFetch();
       const run = vi.fn(async () => ({ response: satisfactionJson({ status: "unaddressed", confidence: 0.9 }) }));
       const env = enabledEnv(run);
-      await runLinkedIssueSatisfactionForAdvisory(env, { mode: "live", settings: blockMode, advisory: advisory(), repoFullName: "acme/widgets", pr, author: "alice", files, confirmedContributor: true, installationId: 1 });
+      const adv = advisory();
+      await runLinkedIssueSatisfactionForAdvisory(env, { mode: "live", settings: blockMode, advisory: adv, repoFullName: "acme/widgets", pr, author: "alice", files, confirmedContributor: true, installationId: 1 });
 
+      // The push site itself records nothing — #8104 replaced #8101's bespoke per-code wiring with one
+      // generic site at the gate's configuredBlockers computation…
+      expect((await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0)).fired).toEqual([]);
+
+      // …so the firing lands exactly when the gate evaluates the pushed finding as a configured blocker.
+      const gate = evaluateGateCheck(adv, { linkedIssueSatisfactionGateMode: "block" }, { env, repoFullName: "acme/widgets", prNumber: 7 });
+      expect(gate.blockers.map((blocker) => blocker.code)).toContain("linked_issue_scope_mismatch");
+      await vi.waitFor(async () => {
+        expect((await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0)).fired).toHaveLength(1);
+      });
       const history = await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0);
-      expect(history.fired).toHaveLength(1);
       expect(history.fired[0]).toMatchObject({
         ruleId: "linked_issue_scope_mismatch",
         targetKey: "acme/widgets#7",
-        outcome: "unaddressed",
+        // outcome is now the finding's severity — the one uniform, code-agnostic value the generic site has —
+        // and the model confidence #8101 recorded survives via the finding's own `confidence` field.
+        outcome: "warning",
         metadata: { confidence: 0.9 },
       });
       expect(history.overrides).toEqual([]); // firing alone is never an override

@@ -265,7 +265,6 @@ import {
 } from "../selfhost/queue-common";
 import { aiReviewCacheInputFingerprint } from "../review/ai-review-cache-input";
 import { linkedIssueSatisfactionCacheInputFingerprint } from "../review/linked-issue-satisfaction-cache-input";
-import { createSignalStore } from "../review/signal-tracking-wire";
 import {
   AGENT_LABEL_NEEDS_REVIEW,
   downgradeCloseToHold,
@@ -7531,21 +7530,14 @@ export async function runLinkedIssueSatisfactionForAdvisory(
         detail: result.result.rationale,
         action: "Confirm this PR actually addresses the linked issue's scope, or link the correct issue.",
         publicText: `AI assessment: this PR does not appear to satisfy its linked issue's scope. ${result.result.rationale}`,
+        // #8104 (supersedes #8101's push-site `recordRuleFired`, which briefly lived here): the fired event is
+        // now recorded generically at the `configuredBlockers` computation inside `evaluateGateCheck`, when the
+        // gate_decision actually evaluates this finding — one wiring site for every current and future blocker
+        // code, and this code cannot double-record. Carrying the model confidence on the finding keeps the
+        // recorded metadata lossless vs #8101 (the gate's confidence-floor logic only ever reads
+        // AI_JUDGMENT_BLOCKER_CODES, so this changes no gate behavior).
+        confidence: result.result.confidence,
       });
-      // #8101: this AI judgment carries gate authority in block mode, so record the firing in the shared
-      // calibration module (#7982) — the fired/override history is what the self-correction pipeline
-      // (#7983/#7984) and the backtest primitives (#8083-#8086) consume. Recorded ONLY here: advisory mode
-      // never pushes the finding, so it never records either. Best-effort like the cache-write handling
-      // above and SignalStore's own contract — a recording failure must never fail the review pass.
-      await createSignalStore(env)
-        .recordRuleFired({
-          ruleId: "linked_issue_scope_mismatch",
-          targetKey: `${args.repoFullName}#${args.pr.number}`,
-          outcome: result.result.status,
-          occurredAt: nowIso(),
-          metadata: { confidence: result.result.confidence },
-        })
-        .catch(() => undefined);
     }
     return { status: result.result.status, rationale: result.result.rationale };
   } catch (error) {
@@ -10295,8 +10287,12 @@ async function maybePublishPrPublicSurface(
       async () => {
         // #2852: computed whenever the check-run publishes OR autonomous merge/close needs a conclusion to act
         // on — this is the actual gate CONCLUSION, independent of whether anything gets published to GitHub.
+        // #8104: this gate_decision computation — and only it — threads the signal-recording context, so every
+        // configured blocker is recorded as fired in the shared calibration module exactly when the gate
+        // actually decides, not when a sweep summary, `@loopover resolve`/`explain`, or a check-run publish
+        // fallback merely re-derives a verdict from the same advisory.
         let evaluation = shouldEvaluateGate
-          ? evaluateGateCheck(advisory, gatePolicy)
+          ? evaluateGateCheck(advisory, gatePolicy, { env, repoFullName, prNumber: pr.number })
           : undefined;
         // Deterministic content/registry surface lane (#1255) — flag-gated + per-repo allowlist, byte-identical when
         // off (evaluateWithSurfaceLane returns the generic evaluation unchanged and resolves no files). A metagraphed
