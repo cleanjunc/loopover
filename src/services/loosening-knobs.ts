@@ -138,6 +138,69 @@ export function evaluateKnobLoosening(
   return null;
 }
 
+export type KnobDriftDirection = "looser" | "tighter" | "shipped";
+
+export type KnobDriftReport = {
+  knobId: string;
+  ruleId: string;
+  liveValue: number;
+  dominatingValue: number;
+  /** `"shipped"` when the dominating alternative IS the registry's shipped value (a drifted override should
+   *  revert -- checked FIRST, before the looser/tighter reading); otherwise `"looser"` (below live) or
+   *  `"tighter"` (above live). The consumer's messaging differs: a looser winner duplicates the loosening
+   *  loop's own proposal (informational), a tighter winner means live config is likely stale (actionable). */
+  direction: KnobDriftDirection;
+  visibleCases: number;
+  heldOutCases: number;
+  visible: BacktestComparison;
+  heldOut: BacktestComparison;
+};
+
+/**
+ * Evaluate whether ANY alternative setting Pareto-dominates the live value on the trailing corpus (#8212,
+ * epic #8211 track A) -- the inverse operator question to {@link evaluateKnobLoosening}: not "can we safely
+ * loosen?" but "is what is CURRENTLY live still the best-supported setting, in either direction?". Same
+ * discipline verbatim: the knob's own split seed/fraction, the same Pareto floor (strictly `"improved"` on
+ * the visible split AND non-`"regressed"` on the deterministic held-out split), the same never-on-noise
+ * sample minimums, and the hard minimum no evidence may cross. The candidate pool is every registry
+ * candidate PLUS the shipped value (a TIGHTER alternative dominating live is exactly the stale-config
+ * signal), minus the live value itself; alternatives are tried nearest-to-live first (the minimal config
+ * change wins, mirroring smallest-step-first; equidistant ties prefer the higher/tighter value,
+ * deterministically). Null -- never a guess -- when the corpus misses the sample floors or nothing strictly
+ * dominates. Pure and deterministic: same knob + corpus + value ⇒ same report.
+ */
+export function evaluateKnobDrift(
+  knob: LoosenableKnob,
+  cases: readonly BacktestCase[],
+  liveValue: number = knob.shippedValue,
+): KnobDriftReport | null {
+  const { visible, heldOut } = splitBacktestCorpus(cases, knob.heldOutFraction, knob.splitSeed);
+  if (visible.length < knob.minVisibleCases || heldOut.length < knob.minHeldOutCases) return null;
+
+  const alternatives = [...new Set([knob.shippedValue, ...knob.candidates])]
+    .filter((value) => value !== liveValue && value >= knob.hardMinimum)
+    .sort((left, right) => Math.abs(left - liveValue) - Math.abs(right - liveValue) || right - left);
+
+  for (const alternative of alternatives) {
+    const visibleComparison = compareOnSlice(knob.ruleId, visible, liveValue, alternative);
+    if (visibleComparison.verdict !== "improved") continue;
+    const heldOutComparison = compareOnSlice(knob.ruleId, heldOut, liveValue, alternative);
+    if (heldOutComparison.verdict === "regressed") continue;
+    return {
+      knobId: knob.knobId,
+      ruleId: knob.ruleId,
+      liveValue,
+      dominatingValue: alternative,
+      direction: alternative === knob.shippedValue ? "shipped" : alternative < liveValue ? "looser" : "tighter",
+      visibleCases: visible.length,
+      heldOutCases: heldOut.length,
+      visible: visibleComparison,
+      heldOut: heldOutComparison,
+    };
+  }
+  return null;
+}
+
 function compareOnSlice(ruleId: string, slice: readonly BacktestCase[], currentValue: number, candidate: number): BacktestComparison {
   const baseline = scoreBacktest(ruleId, slice, buildConfidenceThresholdClassifier(currentValue));
   const proposed = scoreBacktest(ruleId, slice, buildConfidenceThresholdClassifier(candidate));
