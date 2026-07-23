@@ -1053,12 +1053,36 @@ function isConfiguredGateBlocker(finding: AdvisoryFinding, policy: GateCheckPoli
   return false;
 }
 
+// #8130: codes whose raw evaluated content must NEVER be captured into fired-event metadata. `secret_leak`
+// is permanently excluded by design: capturing the diff that triggered it would store the leaked credential
+// itself in the calibration audit trail — a real security regression, not an acceptable tradeoff for
+// backtest coverage. A future sensitive code gets ADDED here deliberately (with this reasoning re-applied);
+// per #8130's Boundaries, extending raw-context capture to secret_leak requires an explicit,
+// maintainer-reviewed redaction design first, never a quiet edit.
+export const RAW_CONTEXT_EXCLUDED_CODES = new Set<string>(["secret_leak"]);
+
+// #8130: mirror of src/services/ai-review.ts's own `input.diff.slice(0, 120000)` bound — the SAME number, so
+// the captured corpus reflects exactly what the AI reviewer saw. Keep the two in sync by hand.
+export const RAW_CONTEXT_MAX_DIFF_CHARS = 120000;
+
 /**
  * Record a {@link RuleFiredEvent} for every finding that `isConfiguredGateBlocker` would put into
  * `configuredBlockers`, excluding `linked_issue_scope_mismatch` (#8104 / complements #8101). Call from the
  * env-bearing gate path immediately after {@link evaluateGateCheck} with the SAME advisory + policy so the
  * filter matches `evaluateGateCheckCore`'s own. Best-effort: a SignalStore failure never throws and never
  * affects the gate verdict.
+ *
+ * #8130: non-excluded codes also capture the raw context their detection actually evaluated, so their
+ * corpora can backtest logic/detection changes rather than only thresholds:
+ *   • `ai_consensus_defect`/`ai_review_split` — the AI review's own diff (`context.aiReviewDiff`, threaded
+ *     from the caller that already holds it; bounded to {@link RAW_CONTEXT_MAX_DIFF_CHARS}).
+ *   • every other non-excluded code — audited individually (#8130): none of them evaluates raw diff content
+ *     (`missing_linked_issue` reads the PR's linkage state, `duplicate_pr_risk` reads sibling-PR overlap,
+ *     `pre_merge_check_required`/`cla_check_unresolved` read check-run conclusions, `manifest_missing_tests`
+ *     reads changed paths vs the manifest's expectations, the review-thread code reads unresolved-thread
+ *     state) — so the detection's own recorded `detail` string, which narrates exactly that evaluated
+ *     signal, is captured as `rawSignal` (same bound).
+ *   • `RAW_CONTEXT_EXCLUDED_CODES` (`secret_leak`) — confidence only, never raw content.
  */
 export async function recordConfiguredGateBlockerSignals(
   env: Env,
@@ -1066,6 +1090,7 @@ export async function recordConfiguredGateBlockerSignals(
   policy: GateCheckPolicy,
   repoFullName: string,
   prNumber: number,
+  context: { aiReviewDiff?: string } = {},
 ): Promise<void> {
   const effective = applyMergeReadinessGate(policy);
   const configuredBlockers = advisoryResult.findings.filter((finding) => isConfiguredGateBlocker(finding, effective));
@@ -1075,13 +1100,22 @@ export async function recordConfiguredGateBlockerSignals(
   await Promise.all(
     configuredBlockers.map((finding) => {
       if (finding.code === "linked_issue_scope_mismatch") return Promise.resolve();
+      const metadata: Record<string, unknown> = {};
+      if (finding.confidence !== undefined) metadata.confidence = finding.confidence;
+      if (!RAW_CONTEXT_EXCLUDED_CODES.has(finding.code)) {
+        if (AI_JUDGMENT_BLOCKER_CODES.has(finding.code)) {
+          if (context.aiReviewDiff !== undefined) metadata.diff = context.aiReviewDiff.slice(0, RAW_CONTEXT_MAX_DIFF_CHARS);
+        } else if (finding.detail) {
+          metadata.rawSignal = finding.detail.slice(0, RAW_CONTEXT_MAX_DIFF_CHARS);
+        }
+      }
       return store
         .recordRuleFired({
           ruleId: finding.code,
           targetKey,
           outcome: finding.severity ?? "blocker",
           occurredAt,
-          ...(finding.confidence !== undefined ? { metadata: { confidence: finding.confidence } } : {}),
+          ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
         .catch(() => undefined);
     }),

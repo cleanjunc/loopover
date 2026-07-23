@@ -10323,7 +10323,11 @@ async function maybePublishPrPublicSurface(
         // #8104: record RuleFiredEvent for every configured gate blocker except linked_issue_scope_mismatch
         // (#8101). Same advisory+policy as evaluateGateCheck above so the filter stays in lock-step.
         if (evaluation) {
-          await recordConfiguredGateBlockerSignals(env, advisory, gatePolicy, repoFullName, pr.number);
+          // #8130: thread the SAME memoized diff the AI review consumed so ai_consensus_defect/ai_review_split
+          // fired events capture the raw context their detection evaluated (never re-fetched).
+          await recordConfiguredGateBlockerSignals(env, advisory, gatePolicy, repoFullName, pr.number, {
+            aiReviewDiff: buildAiReviewDiff(await getReviewFiles()),
+          });
         }
         // Deterministic content/registry surface lane (#1255) — flag-gated + per-repo allowlist, byte-identical when
         // off (evaluateWithSurfaceLane returns the generic evaluation unchanged and resolves no files). A metagraphed

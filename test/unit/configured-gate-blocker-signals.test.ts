@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  RAW_CONTEXT_MAX_DIFF_CHARS,
   recordConfiguredGateBlockerSignals,
   type GateCheckPolicy,
 } from "../../src/rules/advisory";
@@ -163,5 +164,82 @@ describe("recordConfiguredGateBlockerSignals (#8104)", () => {
         7,
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+// ── #8130: bounded raw context in fired-event metadata (secret_leak permanently excluded) ───────────────────
+
+describe("recordConfiguredGateBlockerSignals — raw context capture (#8130)", () => {
+  it("SECURITY: secret_leak's fired event NEVER carries diff or rawSignal, even with confidence and detail present", async () => {
+    const env = createTestEnv();
+    await recordConfiguredGateBlockerSignals(
+      env,
+      advisory([finding({ code: "secret_leak", severity: "critical", confidence: 0.99, detail: "AKIA... committed in config.ts" })]),
+      {},
+      "owner/repo",
+      7,
+      { aiReviewDiff: "+const key = 'AKIA-REAL-SECRET';" },
+    );
+    const [fired] = (await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired;
+    expect(fired!.metadata).toEqual({ confidence: 0.99 });
+    expect(fired!.metadata).not.toHaveProperty("diff");
+    expect(fired!.metadata).not.toHaveProperty("rawSignal");
+  });
+
+  it("captures the AI review's diff (bounded to RAW_CONTEXT_MAX_DIFF_CHARS) for ai_consensus_defect", async () => {
+    const env = createTestEnv();
+    const oversized = "d".repeat(RAW_CONTEXT_MAX_DIFF_CHARS + 5000);
+    await recordConfiguredGateBlockerSignals(
+      env,
+      advisory([finding({ code: "ai_consensus_defect", confidence: 0.95 })]),
+      blockAi,
+      "owner/repo",
+      7,
+      { aiReviewDiff: oversized },
+    );
+    const [fired] = (await createSignalStore(env).queryRuleHistory("ai_consensus_defect", 0)).fired;
+    expect((fired!.metadata as { diff: string }).diff).toHaveLength(RAW_CONTEXT_MAX_DIFF_CHARS);
+    expect((fired!.metadata as { confidence: number }).confidence).toBe(0.95);
+  });
+
+  it("records no diff key for an AI code when the caller has no diff to thread", async () => {
+    const env = createTestEnv();
+    await recordConfiguredGateBlockerSignals(env, advisory([finding({ code: "ai_review_split", confidence: 0.9 })]), blockAi, "owner/repo", 7);
+    const [fired] = (await createSignalStore(env).queryRuleHistory("ai_review_split", 0)).fired;
+    expect(fired!.metadata).toEqual({ confidence: 0.9 });
+  });
+
+  it("captures a non-diff-based code's own evaluated signal (its detail) as rawSignal — the audited fallback", async () => {
+    const env = createTestEnv();
+    await recordConfiguredGateBlockerSignals(
+      env,
+      advisory([finding({ code: "missing_linked_issue", detail: "No linked issue reference found in the PR body." })]),
+      blockLinked,
+      "owner/repo",
+      7,
+      { aiReviewDiff: "+irrelevant" },
+    );
+    const [fired] = (await createSignalStore(env).queryRuleHistory("missing_linked_issue", 0)).fired;
+    expect(fired!.metadata).toEqual({ rawSignal: "No linked issue reference found in the PR body." });
+  });
+
+  it("records no metadata at all for a non-diff code with no confidence and an empty detail", async () => {
+    const env = createTestEnv();
+    await recordConfiguredGateBlockerSignals(env, advisory([finding({ code: "missing_linked_issue", detail: "" })]), blockLinked, "owner/repo", 7);
+    const [fired] = (await createSignalStore(env).queryRuleHistory("missing_linked_issue", 0)).fired;
+    expect(fired!.metadata).toBeUndefined();
+  });
+
+  it("still skips linked_issue_scope_mismatch entirely (#8101's own site records it)", async () => {
+    const env = createTestEnv();
+    await recordConfiguredGateBlockerSignals(
+      env,
+      advisory([finding({ code: "linked_issue_scope_mismatch" }), finding({ code: "missing_linked_issue" })]),
+      { ...blockLinked, linkedIssueSatisfactionGateMode: "block" },
+      "owner/repo",
+      7,
+    );
+    expect((await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0)).fired).toEqual([]);
+    expect((await createSignalStore(env).queryRuleHistory("missing_linked_issue", 0)).fired).toHaveLength(1);
   });
 });
